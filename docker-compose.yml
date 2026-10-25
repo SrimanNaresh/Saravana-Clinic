@@ -1,0 +1,28 @@
+# Smart Clinical Management - Docker Compose
+#
+# Matches the server pattern (156.67.104.242): containers bound to
+# 127.0.0.1:<port>, fronted by HOST nginx which terminates TLS with the
+# wildcard cert at /etc/letsencrypt/live/thangaminfotech.com/.
+#
+# Public routing is handled by the nginx site config (see deploy/nginx-site.conf):
+#   /api/ -> 127.0.0.1:5100  (backend)
+#   /     -> 127.0.0.1:3100  (frontend)
+
+services:
+  backend:
+    build: ./backend
+    container_name: saravanaclinic-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - "127.0.0.1:5100:5000"
+
+  frontend:
+    build: ./frontend
+    container_name: saravanaclinic-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "127.0.0.1:3100:80"

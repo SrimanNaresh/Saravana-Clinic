@@ -1,0 +1,331 @@
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { NavLink, useLocation } from 'react-router-dom';
+import {
+  LayoutDashboard, Pill, ClipboardList, UserPlus, UserCheck,
+  FileText, ChevronDown, ChevronRight, Stethoscope, Settings, Receipt, MessageCircle, TestTube, Sparkles, Package, Building2,
+  ShoppingCart,
+} from 'lucide-react';
+import { MENU_GROUPS } from '../config/menuItems.js';
+import { menuAccessApi } from '../api/client.js';
+import { useAuth } from '../context/AuthContext.jsx';
+
+const GROUP_ICONS = {
+  Dashboard: LayoutDashboard,
+  Registration: UserPlus,
+  Settings: Settings,
+  Reports: FileText,
+  Pharmacy: Package,
+  Clinic: Building2,
+};
+
+// Icon per nested submenu label (any depth below the top-level group) —
+// falls back to Pill when a label isn't listed here.
+const SUBMENU_ICONS = {
+  Medication: Pill,
+  Lab: TestTube,
+  Consultation: Stethoscope,
+  'Patient Queue': UserCheck,
+  Communication: MessageCircle,
+  Billing: Receipt,
+  "Coming Up's": Sparkles,
+  Purchase: ShoppingCart,
+  Sales: Receipt,
+};
+
+// A leaf has `to`; a node has `submenu` (an array of further leaves/nodes,
+// to any depth — e.g. Clinic > Consultation > Medication > Medication List).
+function nodeIsActive(node, pathname) {
+  if (node.to) return pathname === node.to;
+  if (node.submenu) return node.submenu.some((c) => nodeIsActive(c, pathname));
+  return false;
+}
+
+// --- Desktop: horizontal bar of group buttons, each opening a dropdown below it ---
+//
+// The dropdown panel is portaled to document.body instead of nesting inside
+// the bar: the bar needs `overflow-x-auto` so it can scroll when the groups
+// don't all fit, but CSS has no way to scroll one axis while leaving the
+// other's overflow visible — the browser clips both, which squashed any
+// dropdown rendered inline here down to the bar's own height. Portaling
+// escapes that clip and lets the panel float freely below its button.
+const DROPDOWN_WIDTH = 300; // px — wide enough for a 2-level-indented label
+
+// Static (not interpolated) so Tailwind's scanner can see these class names.
+const INDENT_LABEL = ['pl-3', 'pl-5', 'pl-7'];
+const INDENT_LEAF = ['mx-1', 'ml-3 mr-1', 'ml-5 mr-1'];
+
+function DesktopGroupButton({ item, pathname, isOpen, onToggle }) {
+  const Icon = item.icon;
+  const activeInGroup = item.children.some((c) => nodeIsActive(c, pathname));
+
+  return (
+    <button
+      onClick={onToggle}
+      className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1 text-sm font-medium transition-colors ${
+        activeInGroup || isOpen ? 'bg-white/15 text-white' : 'text-white/75 hover:bg-white/10 hover:text-white'
+      }`}
+    >
+      <Icon size={16} className={activeInGroup ? 'text-teal-300' : 'text-white/50'} />
+      {item.label}
+      <ChevronDown size={13} className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+    </button>
+  );
+}
+
+// Recursive: a node with `submenu` renders as an always-expanded, indented
+// labeled section (same visual language Medication/Lab always used); a leaf
+// renders as the link. Depth clamps into INDENT_* so arbitrary nesting still
+// renders sensibly even past the depths this menu actually uses.
+function DesktopNode({ node, pathname, onNavigate, depth }) {
+  const i = Math.min(depth, INDENT_LABEL.length - 1);
+
+  if (node.submenu) {
+    return (
+      <div className="px-1">
+        <p className={`${INDENT_LABEL[i]} pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-300`}>
+          {node.label}
+        </p>
+        {node.submenu.map((child) => (
+          <DesktopNode key={child.label || child.to} node={child} pathname={pathname} onNavigate={onNavigate} depth={depth + 1} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <NavLink
+      to={node.to}
+      onClick={onNavigate}
+      className={({ isActive }) =>
+        `${INDENT_LEAF[i]} block rounded-lg px-3 py-2 text-sm transition-colors ${
+          isActive ? 'bg-brand-50 font-semibold text-brand-700' : 'text-ink-600 hover:bg-ink-50'
+        }`
+      }
+    >
+      {node.label}
+    </NavLink>
+  );
+}
+
+function DesktopDropdownPanel({ item, pathname, rect, panelRef, onNavigate }) {
+  const left = Math.min(Math.max(rect.left, 8), window.innerWidth - DROPDOWN_WIDTH - 8);
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      style={{ position: 'fixed', top: rect.bottom + 6, left, width: DROPDOWN_WIDTH }}
+      className="z-50 max-h-[70vh] overflow-y-auto rounded-xl border border-ink-100 bg-white py-2 shadow-elevated animate-fade-in"
+    >
+      {item.children.map((c) => (
+        <DesktopNode key={c.label || c.to} node={c} pathname={pathname} onNavigate={onNavigate} depth={0} />
+      ))}
+    </div>,
+    document.body
+  );
+}
+
+// --- Mobile: same accordion tree as the old sidebar, shown as a dropdown panel ---
+
+// Recursive: a node with `submenu` is a toggleable accordion branch (open by
+// default only if it contains the active route); a leaf is the link.
+function MobileNode({ node, pathname, onNavigate, depth }) {
+  if (!node.submenu) {
+    return (
+      <NavLink
+        to={node.to}
+        onClick={onNavigate}
+        className={({ isActive }) =>
+          `relative block rounded-lg px-3 py-1.5 text-[13px] transition-colors ${
+            isActive ? 'bg-white/10 font-semibold text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+          }`
+        }
+      >
+        {({ isActive }) => (
+          <>
+            {isActive && <span className="absolute -left-[13px] top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-teal-300" />}
+            {node.label}
+          </>
+        )}
+      </NavLink>
+    );
+  }
+
+  const active = nodeIsActive(node, pathname);
+  const [open, setOpen] = useState(active);
+  const SubIcon = SUBMENU_ICONS[node.label] || Pill;
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-[13px] font-medium transition-colors ${
+          active ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+        }`}
+      >
+        <span className="flex items-center gap-2">
+          <SubIcon size={14} className={active ? 'text-teal-300' : 'text-white/40'} />
+          {node.label}
+        </span>
+        <ChevronRight size={13} className={`transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
+          {node.submenu.map((child) => (
+            <MobileNode key={child.label || child.to} node={child} pathname={pathname} onNavigate={onNavigate} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileGroupItem({ item, pathname, onNavigate }) {
+  const Icon = item.icon;
+  const activeInGroup = item.children.some((c) => nodeIsActive(c, pathname));
+  const [open, setOpen] = useState(activeInGroup);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+          activeInGroup ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5 hover:text-white'
+        }`}
+      >
+        <span className="flex items-center gap-3">
+          <Icon size={18} className={activeInGroup ? 'text-teal-300' : 'text-white/50'} />
+          {item.label}
+        </span>
+        <ChevronRight size={15} className={`transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="ml-[22px] mt-1 space-y-0.5 border-l border-white/10 pl-3 animate-slide-in">
+          {item.children.map((c) => (
+            <MobileNode key={c.label || c.to} node={c} pathname={pathname} onNavigate={onNavigate} depth={1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Recursive: prune a node (and its whole branch) when nothing in it is
+// allowed; keep a submenu node only if at least one descendant survives.
+function filterNode(node, allowed) {
+  if (node.submenu) {
+    const submenu = node.submenu.map((c) => filterNode(c, allowed)).filter(Boolean);
+    return submenu.length ? { label: node.label, submenu } : null;
+  }
+  return allowed(node.key) ? { label: node.label, to: node.to } : null;
+}
+
+// `open` controls visibility on both breakpoints: the horizontal bar on
+// desktop, and the dropdown accordion panel on mobile — one hamburger
+// toggle in the header drives both via this single prop.
+export default function TopNav({ open, onClose }) {
+  const { pathname } = useLocation();
+  const { user } = useAuth();
+  const [access, setAccess] = useState(null); // null = not loaded yet; Map of menuKey -> AccessLevel
+  const [openGroup, setOpenGroup] = useState(null);
+  const [openRect, setOpenRect] = useState(null);
+  const wrapRef = useRef(null);
+  const panelRef = useRef(null);
+  const navRowRef = useRef(null);
+
+  useEffect(() => {
+    if (!user?.userId) return;
+    menuAccessApi.get(user.userId)
+      .then((rows) => setAccess(new Map(rows.map((r) => [r.MenuKey, r.AccessLevel]))))
+      .catch(() => setAccess(new Map()));
+  }, [user?.userId]);
+
+  // Close the open dropdown on an outside click (checking both the bar — for
+  // its buttons — and the portaled panel, which lives outside the bar's DOM
+  // subtree), on route change, or on resize/scroll that would stale its position.
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (wrapRef.current?.contains(e.target)) return;
+      if (panelRef.current?.contains(e.target)) return;
+      setOpenGroup(null);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    window.addEventListener('resize', closeDropdown);
+    return () => {
+      document.removeEventListener('mousedown', onClickOutside);
+      window.removeEventListener('resize', closeDropdown);
+    };
+  }, []);
+  useEffect(() => { setOpenGroup(null); }, [pathname]);
+  useEffect(() => { if (!open) setOpenGroup(null); }, [open]);
+
+  function closeDropdown() { setOpenGroup(null); }
+
+  function toggleGroup(label, e) {
+    if (openGroup === label) { setOpenGroup(null); return; }
+    setOpenRect(e.currentTarget.getBoundingClientRect());
+    setOpenGroup(label);
+  }
+
+  // A user who has never been configured in Menu Access sees everything, as before.
+  // Once an admin has saved any access for them, only items granted Full/View show —
+  // anything not explicitly granted (including menus added after their last save) is hidden.
+  const menu = useMemo(() => {
+    const configured = access && access.size > 0;
+    const allowed = (key) => !configured || ['Full', 'View'].includes(access.get(key));
+    const groups = MENU_GROUPS.map((g) => ({
+      type: 'group',
+      label: g.group,
+      icon: GROUP_ICONS[g.group] || ClipboardList,
+      children: g.items.map((it) => filterNode(it, allowed)).filter(Boolean),
+    })).filter((g) => g.children.length > 0);
+
+    return groups;
+  }, [access]);
+
+  // Mobile accordion closes the whole panel on navigate; desktop only closes its dropdown.
+  const handleMobileNavigate = () => onClose();
+  const handleDesktopNavigate = () => setOpenGroup(null);
+  const openItem = openGroup ? menu.find((m) => m.label === openGroup) : null;
+
+  return (
+    <div ref={wrapRef} className="relative">
+      {/* Desktop: horizontal bar */}
+      <nav
+        ref={navRowRef}
+        onScroll={closeDropdown}
+        className={`no-scrollbar hidden items-center gap-1 overflow-x-auto bg-sidebar-gradient px-4 shadow-sm transition-all duration-200 lg:flex lg:px-6 ${
+          open ? 'max-h-10 py-1 opacity-100' : 'pointer-events-none max-h-0 overflow-hidden py-0 opacity-0'
+        }`}
+      >
+        {menu.map((item) => (
+          <DesktopGroupButton
+            key={item.label}
+            item={item}
+            pathname={pathname}
+            isOpen={openGroup === item.label}
+            onToggle={(e) => toggleGroup(item.label, e)}
+          />
+        ))}
+      </nav>
+
+      {openItem && openRect && (
+        <DesktopDropdownPanel item={openItem} pathname={pathname} rect={openRect} panelRef={panelRef} onNavigate={handleDesktopNavigate} />
+      )}
+
+      {/* Mobile: dropdown accordion panel */}
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30 bg-ink-900/50 backdrop-blur-sm lg:hidden" onClick={onClose} />
+          <div className="absolute inset-x-0 top-full z-40 max-h-[calc(100vh-4rem)] overflow-y-auto bg-sidebar-gradient shadow-2xl animate-fade-in lg:hidden">
+            <nav className="space-y-1 px-3 py-3">
+              {menu.map((item) => (
+                <MobileGroupItem key={item.label} item={item} pathname={pathname} onNavigate={handleMobileNavigate} />
+              ))}
+            </nav>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
