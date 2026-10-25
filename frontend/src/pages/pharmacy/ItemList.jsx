@@ -1,10 +1,12 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Search, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Package, Search, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Modal, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
 import { pharmacyItemApi } from '../../api/client.js';
 import { ItemFields, rowToItemForm, ITEM_FIELD_TO_ROW_KEY, useItemMasters } from './itemFormParts.jsx';
+
+const PAGE_SIZE = 30;
 
 export default function ItemList() {
   const navigate = useNavigate();
@@ -17,6 +19,29 @@ export default function ItemList() {
   const [filterManufacturerId, setFilterManufacturerId] = useState('');
   const [filterSupplierId, setFilterSupplierId] = useState('');
   const masters = useItemMasters();
+  const [page, setPage] = useState(1);
+  const tableBoxRef = useRef(null);
+  const pagerRef = useRef(null);
+  const [tableMaxHeight, setTableMaxHeight] = useState(null);
+
+  // Size the table's scroll box to fill the window from wherever it starts
+  // down to the pager + card's + page's bottom padding, so no screen space is wasted.
+  useLayoutEffect(() => {
+    const box = tableBoxRef.current;
+    if (!box) return undefined;
+    const fit = () => {
+      const card = box.closest('.card');
+      const main = box.closest('main');
+      const pager = pagerRef.current;
+      const bottomGap = (card ? parseFloat(getComputedStyle(card).paddingBottom) + 1 : 0)
+        + (main ? parseFloat(getComputedStyle(main).paddingBottom) : 0)
+        + (pager ? pager.offsetHeight + parseFloat(getComputedStyle(pager).marginTop) : 0);
+      setTableMaxHeight(Math.max(320, Math.floor(window.innerHeight - box.getBoundingClientRect().top - bottomGap)));
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }); // every render: the box remounts after loading/empty states, and the filter bar can wrap
 
   const load = useCallback(async (q = '') => {
     setLoading(true);
@@ -43,7 +68,20 @@ export default function ItemList() {
     (!filterSupplierId || String(r.SupplierId) === filterSupplierId)
   ), [rows, filterItemTypeId, filterManufacturerId, filterSupplierId]);
 
-  const activeFilterCount = [filterItemTypeId, filterManufacturerId, filterSupplierId].filter(Boolean).length;
+  // A new search or filter starts back at page 1; a delete that empties the
+  // last page falls back to the new last page.
+  useEffect(() => { setPage(1); }, [search, filterItemTypeId, filterManufacturerId, filterSupplierId]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = filteredRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const firstRowNo = (currentPage - 1) * PAGE_SIZE + 1;
+  const lastRowNo = firstRowNo + pageRows.length - 1;
+  const goToPage = (p) => {
+    setPage(Math.min(Math.max(1, p), pageCount));
+    tableBoxRef.current?.scrollTo({ top: 0 });
+  };
+
+  const activeFilterCount =[filterItemTypeId, filterManufacturerId, filterSupplierId].filter(Boolean).length;
   const clearFilters = () => { setFilterItemTypeId(''); setFilterManufacturerId(''); setFilterSupplierId(''); };
 
   const editForm = editing && rowToItemForm(editing);
@@ -117,9 +155,16 @@ export default function ItemList() {
         ) : filteredRows.length === 0 ? (
           <EmptyState message={rows.length === 0 ? 'No items found.' : 'No items match the selected filters.'} />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* The table scrolls inside its own viewport-sized box (with its own
+              scrollbar) so long lists stay navigable and the header stays pinned. */}
+          <div
+            ref={tableBoxRef}
+            className="overflow-auto rounded-lg border border-ink-100"
+            style={{ maxHeight: tableMaxHeight ?? 'calc(100vh - 19rem)' }}
+          >
             <table className="w-full text-left text-sm">
-              <thead>
+              <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-ink-50">
                 <tr className="table-head">
                   <th className="rounded-l-lg px-3 py-1.5">Item Code</th>
                   <th className="px-3 py-1.5">Item Name</th>
@@ -133,7 +178,7 @@ export default function ItemList() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((r) => (
+                {pageRows.map((r) => (
                   <tr key={r.ItemId} className="table-row">
                     <td className="px-3 py-1.5 text-slate-500">{r.ItemCode}</td>
                     <td className="px-3 py-1.5 font-medium text-slate-700">{r.Name}</td>
@@ -154,6 +199,17 @@ export default function ItemList() {
               </tbody>
             </table>
           </div>
+          <div ref={pagerRef} className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+            <span>Showing {firstRowNo}–{lastRowNo} of {filteredRows.length} items</span>
+            <div className="flex items-center gap-1">
+              <button type="button" className="btn-ghost px-2 py-1" title="First page" disabled={currentPage === 1} onClick={() => goToPage(1)}><ChevronsLeft size={16} /></button>
+              <button type="button" className="btn-ghost px-2 py-1" title="Previous page" disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)}><ChevronLeft size={16} /></button>
+              <span className="px-2">Page {currentPage} of {pageCount}</span>
+              <button type="button" className="btn-ghost px-2 py-1" title="Next page" disabled={currentPage === pageCount} onClick={() => goToPage(currentPage + 1)}><ChevronRight size={16} /></button>
+              <button type="button" className="btn-ghost px-2 py-1" title="Last page" disabled={currentPage === pageCount} onClick={() => goToPage(pageCount)}><ChevronsRight size={16} /></button>
+            </div>
+          </div>
+          </>
         )}
       </div>
 

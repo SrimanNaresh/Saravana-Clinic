@@ -17,17 +17,20 @@
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: #cbd2de transparent;
+    scrollbar-color: #a7b0c0 #f5f7fa;
   }
   *::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
   *::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-ink-200;
+    @apply rounded-full bg-ink-300;
+  }
+  *::-webkit-scrollbar-track {
+    @apply bg-ink-50;
   }
   *::-webkit-scrollbar-thumb:hover {
-    @apply bg-ink-300;
+    @apply bg-ink-400;
   }
 }
 
