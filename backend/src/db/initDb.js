@@ -255,6 +255,24 @@ CREATE TABLE Supplier (
     CreatedAt   DATETIME NOT NULL DEFAULT GETDATE()
 );
 
+-- Pharmacy > Purchase > Vendor Master: vendors' company, contact and
+-- licensing details (GST No, Drug Licence No).
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Vendor' AND xtype='U')
+CREATE TABLE Vendor (
+    VendorId       INT IDENTITY(1,1) PRIMARY KEY,
+    VendorName     NVARCHAR(200) NOT NULL,
+    CompanyName    NVARCHAR(200) NULL,
+    ContactPerson  NVARCHAR(150) NULL,
+    ContactNo      NVARCHAR(20) NULL,
+    AlternateNo    NVARCHAR(20) NULL,
+    Address        NVARCHAR(500) NULL,
+    GSTNo          NVARCHAR(30) NULL,
+    DLNo           NVARCHAR(50) NULL,
+    Email          NVARCHAR(150) NULL,
+    IsActive       BIT NOT NULL DEFAULT 1,
+    CreatedAt      DATETIME NOT NULL DEFAULT GETDATE()
+);
+
 -- Pharmacy Item's Generic Name and Manufacturer, promoted from free text to
 -- their own small master lists (same pattern as Supplier) so they're
 -- selected from a fixed, reusable set instead of being retyped per item.
@@ -573,6 +591,22 @@ CREATE TABLE SalesReturnItem (
     Amount        DECIMAL(12,2) NOT NULL,
     CONSTRAINT FK_SalesReturnItem_Header FOREIGN KEY (SalesReturnId) REFERENCES SalesReturn(SalesReturnId) ON DELETE CASCADE,
     CONSTRAINT FK_SalesReturnItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
+);
+
+-- Pharmacy > Purchase > Purchase Master: which item is bought from which
+-- vendor, in what quantity and unit.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='PurchaseMaster' AND xtype='U')
+CREATE TABLE PurchaseMaster (
+    PurchaseMasterId INT IDENTITY(1,1) PRIMARY KEY,
+    ItemId           INT NOT NULL,
+    VendorId         INT NOT NULL,
+    Quantity         DECIMAL(10,2) NOT NULL,
+    UnitId           INT NULL,
+    IsActive         BIT NOT NULL DEFAULT 1,
+    CreatedAt        DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_PurchaseMaster_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId),
+    CONSTRAINT FK_PurchaseMaster_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId),
+    CONSTRAINT FK_PurchaseMaster_Unit FOREIGN KEY (UnitId) REFERENCES UnitMaster(UnitId)
 );
 `;
 

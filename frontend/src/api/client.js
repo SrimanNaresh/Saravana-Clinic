@@ -118,6 +118,20 @@ export const supplierApi = {
   remove: (id) => api.delete(`/suppliers/${id}`).then((r) => r.data),
 };
 
+export const vendorApi = {
+  list: (search = '') => api.get('/vendors', { params: { search } }).then((r) => r.data),
+  create: (data) => api.post('/vendors', data).then((r) => r.data),
+  update: (id, data) => api.put(`/vendors/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/vendors/${id}`).then((r) => r.data),
+};
+
+export const purchaseMasterApi = {
+  list: (search = '') => api.get('/purchase-masters', { params: { search } }).then((r) => r.data),
+  create: (data) => api.post('/purchase-masters', data).then((r) => r.data),
+  update: (id, data) => api.put(`/purchase-masters/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/purchase-masters/${id}`).then((r) => r.data),
+};
+
 export const genericNameApi = {
   list: (search = '') => api.get('/generic-names', { params: { search } }).then((r) => r.data),
   create: (data) => api.post('/generic-names', data).then((r) => r.data),

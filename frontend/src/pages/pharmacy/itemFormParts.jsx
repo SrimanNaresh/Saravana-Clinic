@@ -4,7 +4,7 @@ import { supplierApi, genericNameApi, manufacturerApi, itemTypeApi, unitApi } fr
 
 // Searchable master-data dropdown that can also create a brand-new row (via
 // `createFn`) right from here — type a name that doesn't match anything and
-// an "Add" option appears. Used for Supplier, Generic Name, Manufacturer,
+// an "Add" option appears. Without `createFn` it's pick-only. Used for Supplier, Generic Name, Manufacturer,
 // Item Type and Unit, each backed by its own small master table (same
 // pattern as each other).
 export function MasterPicker({ value, onChange, options, onCreated, createFn, placeholder, emptyMessage, addLabel }) {
@@ -65,7 +65,7 @@ export function MasterPicker({ value, onChange, options, onCreated, createFn, pl
             </div>
           </div>
           <div className="max-h-56 overflow-y-auto p-1">
-            {q && !exactMatch && (
+            {createFn && q && !exactMatch && (
               <button
                 type="button"
                 onClick={createAndPick}
@@ -75,8 +75,8 @@ export function MasterPicker({ value, onChange, options, onCreated, createFn, pl
                 <Plus size={15} /> {creating ? 'Adding...' : `Add "${query.trim()}" ${addLabel}`}
               </button>
             )}
-            {filtered.length === 0 && !q ? (
-              <p className="px-3 py-3 text-center text-sm text-ink-400">{emptyMessage}</p>
+            {filtered.length === 0 && (!q || !createFn) ? (
+              <p className="px-3 py-3 text-center text-sm text-ink-400">{q ? 'No matches found.' : emptyMessage}</p>
             ) : (
               filtered.map((o) => (
                 <button

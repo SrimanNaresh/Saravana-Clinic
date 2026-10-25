@@ -33,6 +33,10 @@ import ReportMedicalHistory from './pages/reports/ReportMedicalHistory.jsx';
 import ReportPrescriptions from './pages/reports/ReportPrescriptions.jsx';
 import ReportVisitList from './pages/reports/ReportVisitList.jsx';
 import Supplier from './pages/pharmacy/Supplier.jsx';
+import VendorMaster from './pages/pharmacy/VendorMaster.jsx';
+import VendorList from './pages/pharmacy/VendorList.jsx';
+import PurchaseMaster from './pages/pharmacy/PurchaseMaster.jsx';
+import PurchaseMasterList from './pages/pharmacy/PurchaseMasterList.jsx';
 import Item from './pages/pharmacy/Item.jsx';
 import ItemList from './pages/pharmacy/ItemList.jsx';
 import Stock from './pages/pharmacy/Stock.jsx';
@@ -163,6 +167,10 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/item" element={<Item />} />
               <Route path="/pharmacy/item-list" element={<ItemList />} />
               <Route path="/pharmacy/stock" element={<Stock />} />
+              <Route path="/pharmacy/vendor-master" element={<VendorMaster />} />
+              <Route path="/pharmacy/vendor-list" element={<VendorList />} />
+              <Route path="/pharmacy/purchase-master" element={<PurchaseMaster />} />
+              <Route path="/pharmacy/purchase-master-list" element={<PurchaseMasterList />} />
               <Route path="/pharmacy/purchase-invoice" element={<PurchaseInvoice />} />
               <Route path="/pharmacy/purchase-invoice-list" element={<PurchaseInvoiceList />} />
               <Route path="/pharmacy/purchase-return" element={<PurchaseReturn />} />

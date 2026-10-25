@@ -36,7 +36,11 @@ export const MENU_GROUPS = [
       {
         label: 'Purchase',
         submenu: [
-          { key: 'pharmacy.purchase-invoice', label: 'Invoice', to: '/pharmacy/purchase-invoice' },
+          { key: 'pharmacy.vendor-master', label: 'Vendor Master', to: '/pharmacy/vendor-master' },
+          { key: 'pharmacy.vendor-list', label: 'Vendor List', to: '/pharmacy/vendor-list' },
+          { key: 'pharmacy.purchase-master', label: 'Purchase Master', to: '/pharmacy/purchase-master' },
+          { key: 'pharmacy.purchase-master-list', label: 'Purchase Master List', to: '/pharmacy/purchase-master-list' },
+          { key: 'pharmacy.purchase-invoice',label: 'Invoice', to: '/pharmacy/purchase-invoice' },
           { key: 'pharmacy.purchase-invoice-list', label: 'Invoice List', to: '/pharmacy/purchase-invoice-list' },
           { key: 'pharmacy.purchase-return', label: 'Return', to: '/pharmacy/purchase-return' },
           { key: 'pharmacy.purchase-return-list', label: 'Return List', to: '/pharmacy/purchase-return-list' },
