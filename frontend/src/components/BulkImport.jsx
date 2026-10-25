@@ -21,8 +21,12 @@ import { Download, Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-r
  *               hidden "Lists" sheet (referenced by range) rather than inline
  *               in the validation formula, since Excel's inline list formula
  *               has a ~255-character limit that a 20+ option list can exceed.
+ *  - isHeaderRow: optional (cells: string[]) => boolean — for Excel files that
+ *               aren't our template (e.g. an exported report with title rows
+ *               above the headers), the first of the top 20 rows it accepts is
+ *               used as the header row. Defaults to row 1 when none match.
  */
-export default function BulkImport({ columns, sample = [], fileName = 'template', onImport, onDone, note, variant = 'panel', dropdowns }) {
+export default function BulkImport({ columns, sample = [], fileName = 'template', onImport, onDone, note, variant = 'panel', dropdowns, isHeaderRow }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -116,7 +120,12 @@ export default function BulkImport({ columns, sample = [], fileName = 'template'
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        let headerRow = 0;
+        if (isHeaderRow) {
+          const top = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }).slice(0, 20);
+          headerRow = Math.max(0, top.findIndex((cells) => isHeaderRow(cells.map(String))));
+        }
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, range: headerRow });
         await processRows(rows);
       } catch (err) {
         setResult({ error: err.message || 'Could not read that Excel file' });
