@@ -18,13 +18,15 @@ const FILL_COLUMNS = [
   { field: 'GenericName', rowKey: 'GenericNameName', list: 'genericNames', width: 'w-32' },
   { field: 'Manufacturer', rowKey: 'ManufacturerName', list: 'manufacturers', width: 'w-32' },
   { field: 'HSNCode', rowKey: 'HSNCode', suggest: 'as new HSN code', width: 'w-20' },
-  { field: 'MRP', rowKey: 'MRP', numeric: true, width: 'w-20' },
-  { field: 'Unit', rowKey: 'UnitName', list: 'units', width: 'w-20' },
+  { field: 'MRP', rowKey: 'MRP', numeric: true, alwaysEdit: true, width: 'w-20' },
+  { field: 'Unit', rowKey: 'UnitName', list: 'units', alwaysEdit: true, width: 'w-20' },
   { field: 'GSTPercent', rowKey: 'GSTPercent', numeric: true, suggest: 'as new GST %', width: 'w-16' },
-  { field: 'SellPrice', rowKey: 'SellPrice', numeric: true, width: 'w-20' },
+  { field: 'SellPrice', rowKey: 'SellPrice', numeric: true, alwaysEdit: true, width: 'w-20' },
   { field: 'Rack', rowKey: 'Rack', suggest: 'as new rack', width: 'w-16' },
   { field: 'BoxNo', rowKey: 'BoxNo', suggest: 'as new box no', width: 'w-16' },
 ];
+// MRP / Unit / Sell Price (`alwaysEdit` set) stay a box even when filled,
+// showing the current value to change.
 // HSN / GST / Rack / Box No (`suggest` set) have no master table: their dropdowns
 // list the values already used on items, and "Add" just keeps the typed
 // value (offered to the other rows too until the list reloads).
@@ -351,7 +353,7 @@ export default function ItemListNew() {
             className="overflow-auto rounded-lg border border-ink-100"
             style={{ maxHeight: tableMaxHeight ?? 'calc(100vh - 19rem)' }}
           >
-            <table className="w-full whitespace-nowrap text-left text-[11px]">
+            <table className="w-full whitespace-nowrap text-center text-[11px]">
               <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-ink-50">
                 <tr className="table-head !text-[11px]">
                   <th className="rounded-l-lg px-3 py-1.5">Item Code</th>
@@ -385,10 +387,10 @@ export default function ItemListNew() {
                       <td className="px-3 py-1 font-medium text-slate-700">{r.Name}</td>
                       {FILL_COLUMNS.map((c) => (
                         <td key={c.field} className="px-2 py-1 text-slate-500">
-                          {!isBlank(r[c.rowKey]) ? r[c.rowKey] : c.list ? (
+                          {!isBlank(r[c.rowKey]) && !c.alwaysEdit ? r[c.rowKey] : c.list ? (
                             <CellCombo
                               className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
-                              value={typed?.[c.field] ?? ''}
+                              value={typed?.[c.field] ?? cellText(r[c.rowKey])}
                               onChange={(v) => setCell(r.ItemId, c.field, v)}
                               options={masters[c.list]}
                               createFn={MASTER_CREATE[c.list].create}
@@ -400,7 +402,7 @@ export default function ItemListNew() {
                           ) : c.suggest ? (
                             <CellCombo
                               className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
-                              value={typed?.[c.field] ?? ''}
+                              value={typed?.[c.field] ?? cellText(r[c.rowKey])}
                               onChange={(v) => setCell(r.ItemId, c.field, v)}
                               options={suggestions[c.field]}
                               createFn={addLocal}
@@ -412,7 +414,7 @@ export default function ItemListNew() {
                           ) : (
                             <input
                               className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
-                              value={typed?.[c.field] ?? ''}
+                              value={typed?.[c.field] ?? cellText(r[c.rowKey])}
                               onChange={(e) => setCell(r.ItemId, c.field, e.target.value)}
                               onKeyDown={(e) => { if (e.key === 'Enter') saveRow(r); }}
                               inputMode={c.numeric ? 'decimal' : undefined}
