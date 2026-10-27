@@ -209,6 +209,45 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
+// Free-text fields ItemList new's dropdowns list by value (they have no
+// master table), with the column and SQL type each one is stored as.
+const VALUE_FIELDS = {
+  HSNCode: ['HSNCode', sql.NVarChar(20)],
+  GSTPercent: ['GSTPercent', sql.Decimal(5, 2)],
+  Rack: ['Rack', sql.NVarChar(50)],
+  BoxNo: ['BoxNo', sql.NVarChar(50)],
+};
+
+// Renames one of those values on every item using it ({ field, from, to }),
+// or clears it when `to` is blank — ItemList new's dropdown Edit / Delete.
+router.post('/replace-value', async (req, res) => {
+  try {
+    const { field, from, to } = req.body || {};
+    const spec = VALUE_FIELDS[field];
+    if (!spec) return res.status(400).json({ error: 'Unknown field' });
+    const blank = (v) => v === undefined || v === null || String(v).trim() === '';
+    if (blank(from)) return res.status(400).json({ error: 'Value to change is required' });
+    const [col, type] = spec;
+    const numeric = field === 'GSTPercent';
+    if (numeric && (Number.isNaN(Number(from)) || (!blank(to) && Number.isNaN(Number(to))))) {
+      return res.status(400).json({ error: 'GST must be a number' });
+    }
+    const value = (v) => (blank(v) ? null : numeric ? Number(v) : String(v).trim());
+    const pool = await getPool();
+    const upd = await pool.request()
+      .input('from', type, value(from))
+      .input('to', type, value(to))
+      .query(`
+        UPDATE PharmacyItem SET ${col} = @to
+        WHERE IsActive = 1 AND ${numeric ? col : `LTRIM(RTRIM(${col}))`} = @from;
+        SELECT @@ROWCOUNT AS affected;
+      `);
+    res.json({ affected: upd.recordset[0].affected });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Bulk insert / update. Rows identifying an existing item (a numeric ItemId,
 // or an ItemCode like "ITM000042") are updated, others inserted. Item Type /
 // Unit / Generic Name / Manufacturer / Supplier are given as plain names

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Package, Search, List, X, CheckCircle2, Save, Loader2, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Package, Search, List, X, Check, CheckCircle2, Save, Loader2, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
 import { pharmacyItemApi, genericNameApi, manufacturerApi, unitApi } from '../../api/client.js';
@@ -34,48 +34,64 @@ const addLocal = (name) => Promise.resolve({ id: name, name });
 const isBlank = (v) => v === null || v === undefined || String(v).trim() === '';
 const cellText = (v) => (isBlank(v) ? '' : String(v));
 
-// How a master-backed box adds a brand-new name: the create call (returning
-// { id, name }), the useItemMasters() adder that remembers it, and the label.
+// A master-backed box's master: its API, how a create's result maps to
+// { id, name }, the useItemMasters() adder that remembers a new row, and labels.
 const MASTER_CREATE = {
   genericNames: {
-    create: (name) => genericNameApi.create({ name }).then((r) => ({ id: r.GenericNameId, name: r.Name })),
-    adder: 'addGenericName', addLabel: 'as new generic name',
+    api: genericNameApi, toRow: (r) => ({ id: r.GenericNameId, name: r.Name }),
+    adder: 'addGenericName', addLabel: 'as new generic name', noun: 'generic name',
   },
   manufacturers: {
-    create: (name) => manufacturerApi.create({ name }).then((r) => ({ id: r.ManufacturerId, name: r.Name })),
-    adder: 'addManufacturer', addLabel: 'as new manufacturer',
+    api: manufacturerApi, toRow: (r) => ({ id: r.ManufacturerId, name: r.Name }),
+    adder: 'addManufacturer', addLabel: 'as new manufacturer', noun: 'manufacturer',
   },
   units: {
-    create: (name) => unitApi.create({ name }).then((r) => ({ id: r.UnitId, name: r.Name })),
-    adder: 'addUnit', addLabel: 'as new unit',
+    api: unitApi, toRow: (r) => ({ id: r.UnitId, name: r.Name }),
+    adder: 'addUnit', addLabel: 'as new unit', noun: 'unit',
   },
 };
 const MAX_SUGGESTIONS = 50;
 
-// A table-cell text box with a searchable dropdown of master names, like the
-// Item screen's MasterPicker: typing filters the names, and a name that
-// matches none (ignoring case) offers an "Add" option that creates it in the
-// master right away. The dropdown is portalled with fixed positioning so the
-// table's scroll box doesn't clip it; it closes when anything scrolls.
-function CellCombo({ value, onChange, options, createFn, onCreated, addLabel, onEnter, className, disabled }) {
+// A table-cell text box with a searchable dropdown of names, like the Item
+// screen's MasterPicker: typing filters the names, and a name that matches
+// none (ignoring case) offers an "Add" option. The footer has New / Edit /
+// Delete: Edit and Delete act on the highlighted name (picked with the arrow
+// keys, else the one matching the box). The dropdown is portalled with fixed
+// positioning so the table's scroll box doesn't clip it; it closes when
+// anything else scrolls.
+//  - createFn(name) -> { id, name }, then onCreated(row)
+//  - onRename(option, newName) / onDelete(option): async; onDelete returns
+//    false when the user backs out of its confirm
+function CellCombo({ value, onChange, options, createFn, onCreated, onRename, onDelete, addLabel, onEnter, className, disabled }) {
   const inputRef = useRef(null);
+  const dropRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState(null);
   const [active, setActive] = useState(-1);
-  const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  // The footer's inline name box: null, or { kind: 'new' | 'edit', text, target }.
+  const [form, setForm] = useState(null);
 
   const q = value.trim().toLowerCase();
   const filtered = (q ? options.filter((o) => o.name.toLowerCase().includes(q)) : options).slice(0, MAX_SUGGESTIONS);
-  const exactMatch = options.some((o) => o.name.toLowerCase() === q);
+  const exactMatch = options.find((o) => o.name.toLowerCase() === q);
   const canAdd = !!q && !exactMatch;
   // Keyboard order: the Add option (when shown) first, then the names.
   const choices = [...(canAdd ? [{ add: true }] : []), ...filtered];
+  const target = (choices[active] && !choices[active].add ? choices[active] : null) || exactMatch || null;
 
   const openAt = () => {
     if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
     setOpen(true);
   };
-  const close = () => { setOpen(false); setActive(-1); };
+  const close = () => { setOpen(false); setActive(-1); setForm(null); setError(''); };
+  // Focus leaving for somewhere outside the box and its dropdown closes it.
+  const closeIfOutside = (e) => {
+    const to = e.relatedTarget;
+    if (to && (to === inputRef.current || dropRef.current?.contains(to))) return;
+    close();
+  };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -86,20 +102,55 @@ function CellCombo({ value, onChange, options, createFn, onCreated, addLabel, on
   }, [open]);
 
   const pick = (name) => { onChange(name); close(); };
-  const addNew = async () => {
-    const name = value.trim();
-    setCreating(true);
+  const run = async (fn) => {
+    setBusy(true);
+    setError('');
     try {
-      const created = await createFn(name);
-      onCreated(created);
-      pick(created.name);
-    } catch {
-      // keep the dropdown open with the typed name so the user can retry
+      await fn();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed');
     } finally {
-      setCreating(false);
+      setBusy(false);
     }
   };
-  const choose = (c) => (c.add ? addNew() : pick(c.name));
+  const addNew = (name) => run(async () => {
+    const created = await createFn(name);
+    onCreated(created);
+    pick(created.name);
+  });
+  const choose = (c) => (c.add ? addNew(value.trim()) : pick(c.name));
+
+  const startForm = (kind) => {
+    setError('');
+    setForm(kind === 'new' ? { kind, text: canAdd ? value.trim() : '' } : { kind, text: target.name, target });
+  };
+  const cancelForm = () => { setForm(null); setError(''); inputRef.current?.focus(); };
+  const submitForm = () => {
+    const name = form.text.trim();
+    if (!name) return setError('Enter a name');
+    if (form.kind === 'new') {
+      const existing = options.find((o) => o.name.toLowerCase() === name.toLowerCase());
+      return existing ? pick(existing.name) : addNew(name);
+    }
+    if (name === form.target.name) return cancelForm();
+    if (options.some((o) => o !== form.target && o.name.toLowerCase() === name.toLowerCase())) {
+      return setError(`"${name}" already exists`);
+    }
+    const old = form.target.name;
+    return run(async () => {
+      await onRename(form.target, name);
+      if (value.trim() === old) onChange(name);
+      setForm(null);
+      setActive(-1);
+      inputRef.current?.focus();
+    });
+  };
+  const remove = () => run(async () => {
+    const old = target.name;
+    if ((await onDelete(target)) === false) return;
+    if (value.trim().toLowerCase() === old.toLowerCase()) onChange('');
+    setActive(-1);
+  });
 
   const onKeyDown = (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -114,6 +165,8 @@ function CellCombo({ value, onChange, options, createFn, onCreated, addLabel, on
     }
   };
 
+  const footBtn = 'flex items-center gap-1 rounded px-1.5 py-1 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40';
+
   return (
     <>
       <input
@@ -122,35 +175,80 @@ function CellCombo({ value, onChange, options, createFn, onCreated, addLabel, on
         value={value}
         disabled={disabled}
         onFocus={openAt}
-        onBlur={close}
-        onChange={(e) => { onChange(e.target.value); setActive(-1); openAt(); }}
+        onBlur={closeIfOutside}
+        onChange={(e) => { onChange(e.target.value); setActive(-1); setForm(null); openAt(); }}
         onKeyDown={onKeyDown}
         autoComplete="off"
       />
-      {open && rect && choices.length > 0 && createPortal(
+      {open && rect && createPortal(
         <div
+          ref={dropRef}
           data-cell-combo
-          className="fixed z-50 max-h-56 overflow-y-auto rounded-lg border border-ink-200 bg-white p-1 text-xs shadow-elevated"
-          style={{ top: rect.bottom + 2, left: rect.left, minWidth: Math.max(rect.width, 224) }}
-          // Keep focus in the box while clicking an option.
-          onMouseDown={(e) => e.preventDefault()}
+          className="fixed z-50 flex flex-col rounded-lg border border-ink-200 bg-white text-xs shadow-elevated"
+          style={{ top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 224) }}
+          // Keep focus in the cell box while clicking, except in the footer's name box.
+          onMouseDown={(e) => { if (e.target.tagName !== 'INPUT') e.preventDefault(); }}
         >
-          {choices.map((c, i) => (
-            <button
-              key={c.add ? '__add' : c.id}
-              type="button"
-              onClick={() => choose(c)}
-              onMouseEnter={() => setActive(i)}
-              disabled={c.add && creating}
-              className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors disabled:opacity-50 ${
-                c.add ? 'font-medium text-brand-700' : 'text-ink-600'
-              } ${i === active ? (c.add ? 'bg-brand-50' : 'bg-ink-50') : ''}`}
-            >
-              {c.add
-                ? <><Plus size={13} /> {creating ? 'Adding...' : `Add "${value.trim()}" ${addLabel}`}</>
-                : <span className="truncate">{c.name}</span>}
-            </button>
-          ))}
+          <div className="max-h-52 overflow-y-auto p-1">
+            {choices.length === 0 && <p className="px-2.5 py-2 text-center text-ink-400">No values yet</p>}
+            {choices.map((c, i) => (
+              <button
+                key={c.add ? '__add' : c.id}
+                type="button"
+                onClick={() => choose(c)}
+                disabled={c.add && busy}
+                className={`flex w-full items-center gap-2 rounded-md border-l-2 px-2.5 py-1.5 text-left transition-colors disabled:opacity-50 ${
+                  c.add ? 'border-transparent font-medium text-brand-700 hover:bg-brand-50' : 'text-ink-600 hover:bg-ink-50'
+                } ${!c.add && c === target ? 'border-brand-700 bg-brand-50 font-medium text-ink-800' : 'border-transparent'} ${
+                  c.add && i === active ? 'bg-brand-50' : ''}`}
+              >
+                {c.add
+                  ? <><Plus size={13} /> {busy ? 'Adding...' : `Add "${value.trim()}" ${addLabel}`}</>
+                  : <span className="truncate">{c.name}</span>}
+              </button>
+            ))}
+          </div>
+
+          <div className="border-t border-ink-100 px-1.5 py-1">
+            {form ? (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  className="h-6 min-w-0 flex-1 rounded border border-ink-200 px-1.5 text-xs focus:border-brand-400 focus:outline-none"
+                  placeholder={form.kind === 'new' ? 'New name' : 'Rename to'}
+                  value={form.text}
+                  disabled={busy}
+                  onChange={(e) => setForm((f) => ({ ...f, text: e.target.value }))}
+                  onBlur={closeIfOutside}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); submitForm(); }
+                    if (e.key === 'Escape') { e.preventDefault(); cancelForm(); }
+                  }}
+                />
+                <button type="button" className={`${footBtn} text-brand-700 hover:bg-brand-50`} title="Save" disabled={busy} onClick={submitForm}><Check size={13} /></button>
+                <button type="button" className={`${footBtn} text-ink-500 hover:bg-ink-50`} title="Cancel" disabled={busy} onClick={cancelForm}><X size={13} /></button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <button type="button" className={`${footBtn} text-brand-700 hover:bg-brand-50`} disabled={busy} onClick={() => startForm('new')}>
+                  <Plus size={13} /> New
+                </button>
+                <button
+                  type="button" className={`${footBtn} text-ink-500 hover:bg-ink-50`} disabled={busy || !target || !onRename}
+                  title={target ? `Rename "${target.name}"` : 'Highlight a value to edit it'} onClick={() => startForm('edit')}
+                >
+                  <Pencil size={12} /> Edit
+                </button>
+                <button
+                  type="button" className={`${footBtn} text-ink-500 hover:bg-red-50 hover:text-red-600`} disabled={busy || !target || !onDelete}
+                  title={target ? `Delete "${target.name}"` : 'Highlight a value to delete it'} onClick={remove}
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              </div>
+            )}
+            {error && <p className="px-1 pt-1 text-red-600">{error}</p>}
+          </div>
         </div>,
         document.body,
       )}
@@ -263,6 +361,56 @@ export default function ItemListNew() {
     return [c.field, names.map((n) => ({ id: n, name: n }))];
   })), [rows, addedValues]);
   const rememberValue = (field) => (row) => setAddedValues((a) => ({ ...a, [field]: [...(a[field] || []), row.name] }));
+
+  // Dropdown Edit / Delete. A master name is renamed or removed in its master
+  // (items already using a removed one keep showing it); a HSN / GST / Rack /
+  // Box No value is renamed or cleared on every item that has it.
+  const afterValueChange = async (message) => {
+    setNotice(message);
+    masters.reload();
+    await load(search, { quiet: true });
+  };
+  const masterHandlers = (list) => {
+    const m = MASTER_CREATE[list];
+    return {
+      createFn: (name) => m.api.create({ name }).then(m.toRow),
+      onCreated: masters[m.adder],
+      addLabel: m.addLabel,
+      onRename: async (opt, name) => {
+        await m.api.update(opt.id, { name });
+        await afterValueChange(`Renamed ${m.noun} "${opt.name}" to "${name}".`);
+      },
+      onDelete: async (opt) => {
+        if (!confirm(`Delete ${m.noun} "${opt.name}" from the list?`)) return false;
+        await m.api.remove(opt.id);
+        await afterValueChange(`Deleted ${m.noun} "${opt.name}".`);
+        return true;
+      },
+    };
+  };
+  const valueHandlers = (c) => {
+    const swapAdded = (from, to) => setAddedValues((a) => ({
+      ...a, [c.field]: (a[c.field] || []).filter((v) => v !== from).concat(to ? [to] : []),
+    }));
+    const label = c.suggest.replace(/^as new /, '');
+    return {
+      createFn: addLocal,
+      onCreated: rememberValue(c.field),
+      addLabel: c.suggest,
+      onRename: async (opt, name) => {
+        const { affected } = await pharmacyItemApi.replaceValue(c.field, opt.name, name);
+        swapAdded(opt.name, name);
+        await afterValueChange(`Renamed ${label} "${opt.name}" to "${name}" on ${affected} item${affected === 1 ? '' : 's'}.`);
+      },
+      onDelete: async (opt) => {
+        if (!confirm(`Delete ${label} "${opt.name}"? It will be cleared from every item that has it.`)) return false;
+        const { affected } = await pharmacyItemApi.replaceValue(c.field, opt.name, '');
+        swapAdded(opt.name, null);
+        await afterValueChange(`Deleted ${label} "${opt.name}" from ${affected} item${affected === 1 ? '' : 's'}.`);
+        return true;
+      },
+    };
+  };
 
   const stopEdit = (itemId) => setEditRows(({ [itemId]: _, ...rest }) => rest);
   const setCell = (itemId, field, value) => setEditRows((e) => ({ ...e, [itemId]: { ...e[itemId], [field]: value } }));
@@ -393,9 +541,7 @@ export default function ItemListNew() {
                               value={typed?.[c.field] ?? cellText(r[c.rowKey])}
                               onChange={(v) => setCell(r.ItemId, c.field, v)}
                               options={masters[c.list]}
-                              createFn={MASTER_CREATE[c.list].create}
-                              onCreated={masters[MASTER_CREATE[c.list].adder]}
-                              addLabel={MASTER_CREATE[c.list].addLabel}
+                              {...masterHandlers(c.list)}
                               onEnter={() => saveRow(r)}
                               disabled={saving}
                             />
@@ -405,9 +551,7 @@ export default function ItemListNew() {
                               value={typed?.[c.field] ?? cellText(r[c.rowKey])}
                               onChange={(v) => setCell(r.ItemId, c.field, v)}
                               options={suggestions[c.field]}
-                              createFn={addLocal}
-                              onCreated={rememberValue(c.field)}
-                              addLabel={c.suggest}
+                              {...valueHandlers(c)}
                               onEnter={() => saveRow(r)}
                               disabled={saving}
                             />
