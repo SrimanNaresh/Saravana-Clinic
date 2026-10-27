@@ -616,6 +616,24 @@ CREATE TABLE PurchaseMaster (
     CONSTRAINT FK_PurchaseMaster_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId),
     CONSTRAINT FK_PurchaseMaster_Unit FOREIGN KEY (UnitId) REFERENCES UnitMaster(UnitId)
 );
+
+-- Purchase Master's pricing fields: HSN and manufacturer (prefilled from the
+-- item), the item's previous and current price, GST / discount % and the
+-- resulting net price.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='HSNCode' AND Object_ID=Object_ID('PurchaseMaster'))
+    ALTER TABLE PurchaseMaster ADD HSNCode NVARCHAR(20) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='ManufacturerId' AND Object_ID=Object_ID('PurchaseMaster'))
+    ALTER TABLE PurchaseMaster ADD ManufacturerId INT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='OldPrice' AND Object_ID=Object_ID('PurchaseMaster'))
+    ALTER TABLE PurchaseMaster ADD OldPrice DECIMAL(10,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='CurrentPrice' AND Object_ID=Object_ID('PurchaseMaster'))
+    ALTER TABLE PurchaseMaster ADD CurrentPrice DECIMAL(10,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='GSTPercent' AND Object_ID=Object_ID('PurchaseMaster'))
+    ALTER TABLE PurchaseMaster ADD GSTPercent DECIMAL(5,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscountPercent' AND Object_ID=Object_ID('PurchaseMaster'))
+    ALTER TABLE PurchaseMaster ADD DiscountPercent DECIMAL(5,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='NetPrice' AND Object_ID=Object_ID('PurchaseMaster'))
+    ALTER TABLE PurchaseMaster ADD NetPrice DECIMAL(12,2) NULL;
 `;
 
 async function init() {
