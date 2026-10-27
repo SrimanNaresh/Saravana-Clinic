@@ -8,8 +8,8 @@ import ItemImport, { ITEM_LIST_TEMPLATE } from './ItemImport.jsx';
 
 const PAGE_SIZE = 30;
 
-// List columns after Item Name, in display order. An empty cell shows a
-// read-only text box; the row's Edit icon opens every cell for editing.
+// List columns after Item Name, in display order. An empty cell is always a
+// text box to type into; the row's Edit icon also opens its filled cells.
 // `field` is the key the PATCH route takes, `rowKey` where the list row
 // carries the value, `list` the master whose names are suggested, `width`
 // the box's width.
@@ -34,9 +34,12 @@ export default function ItemListNew() {
   // The screen opens empty; items are fetched only after View List or an upload.
   const [listShown, setListShown] = useState(false);
   const [notice, setNotice] = useState('');
-  // Rows in edit mode and their box values: { [ItemId]: { [field]: value } }.
+  // Typed, unsaved box values: { [ItemId]: { [field]: value } }.
   const [editRows, setEditRows] = useState({});
+  // Rows opened with the Edit icon, whose filled cells become boxes too.
+  const [fullEditIds, setFullEditIds] = useState(() => new Set());
   const [savingId, setSavingId] = useState(null);
+  const [savingAll, setSavingAll] = useState(false);
   const [search, setSearch] = useState('');
   const masters = useItemMasters();
   const [page, setPage] = useState(1);
@@ -119,20 +122,26 @@ export default function ItemListNew() {
     tableBoxRef.current?.scrollTo({ top: 0 });
   };
 
-  const startEdit = (r) => setEditRows((e) => ({
-    ...e,
-    [r.ItemId]: Object.fromEntries(FILL_COLUMNS.map((c) => [c.field, cellText(r[c.rowKey])])),
-  }));
-  const stopEdit = (itemId) => setEditRows(({ [itemId]: _, ...rest }) => rest);
+  const startEdit = (r) => setFullEditIds((s) => new Set(s).add(r.ItemId));
+  const stopEdit = (itemId) => {
+    setEditRows(({ [itemId]: _, ...rest }) => rest);
+    setFullEditIds((s) => { const next = new Set(s); next.delete(itemId); return next; });
+  };
   const setCell = (itemId, field, value) => setEditRows((e) => ({ ...e, [itemId]: { ...e[itemId], [field]: value } }));
 
-  // Sends only the boxes whose value changed. A box cleared to blank is left
+  // The boxes on a row whose value changed. A box cleared to blank is left
   // as it was (the PATCH route never blanks a field).
-  const saveRow = async (r) => {
-    const values = editRows[r.ItemId];
-    const changed = Object.fromEntries(FILL_COLUMNS
+  const changedFields = (r) => {
+    const values = editRows[r.ItemId] || {};
+    return Object.fromEntries(FILL_COLUMNS
       .filter((c) => !isBlank(values[c.field]) && values[c.field].trim() !== cellText(r[c.rowKey]))
       .map((c) => [c.field, values[c.field].trim()]));
+  };
+  // Rows with typed changes, on any page (for Save All).
+  const pendingRows = rows.filter((r) => editRows[r.ItemId] && Object.keys(changedFields(r)).length > 0);
+
+  const saveRow = async (r) => {
+    const changed = changedFields(r);
     if (Object.keys(changed).length === 0) return stopEdit(r.ItemId);
     setSavingId(r.ItemId);
     try {
@@ -146,6 +155,27 @@ export default function ItemListNew() {
     } finally {
       setSavingId(null);
     }
+  };
+
+  // Saves every row with typed changes in one go. Rows that fail keep their
+  // typed values so they can be retried.
+  const saveAll = async () => {
+    const batch = pendingRows.map((r) => [r, changedFields(r)]);
+    setSavingAll(true);
+    const results = await Promise.allSettled(batch.map(([r, changed]) => pharmacyItemApi.patch(r.ItemId, changed)));
+    const failed = batch.filter((_, i) => results[i].status === 'rejected');
+    batch.forEach(([r], i) => { if (results[i].status === 'fulfilled') stopEdit(r.ItemId); });
+    const saved = batch.length - failed.length;
+    if (saved) {
+      setNotice(`Saved ${saved} item${saved === 1 ? '' : 's'}.`);
+      masters.reload();
+      await load(search, { quiet: true });
+    }
+    if (failed.length) {
+      const err = results.find((x) => x.status === 'rejected').reason;
+      show(`${failed.length} item(s) not saved: ${err.response?.data?.error || err.message}`, 'error');
+    }
+    setSavingAll(false);
   };
 
   const remove = async (row) => {
@@ -204,9 +234,9 @@ export default function ItemListNew() {
             className="overflow-auto rounded-lg border border-ink-100"
             style={{ maxHeight: tableMaxHeight ?? 'calc(100vh - 19rem)' }}
           >
-            <table className="w-full whitespace-nowrap text-left text-sm">
+            <table className="w-full whitespace-nowrap text-left text-[11px]">
               <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-ink-50">
-                <tr className="table-head">
+                <tr className="table-head !text-[11px]">
                   <th className="rounded-l-lg px-3 py-1.5">Item Code</th>
                   <th className="px-3 py-1.5">Item Name</th>
                   <th className="px-3 py-1.5">Generic Name</th>
@@ -231,24 +261,24 @@ export default function ItemListNew() {
                     </td>
                   </tr>
                 ) : pageRows.map((r) => {
-                  const edit = editRows[r.ItemId];
-                  const saving = savingId === r.ItemId;
+                  const typed = editRows[r.ItemId];
+                  const full = fullEditIds.has(r.ItemId);
+                  const edit = !!typed || full; // typing or the Edit icon puts the row in edit mode
+                  const saving = savingId === r.ItemId || (savingAll && !!typed);
                   return (
                     <tr key={r.ItemId} className={`table-row ${edit ? 'bg-brand-50/40' : ''}`}>
                       <td className="px-3 py-1 text-slate-500">{r.ItemCode}</td>
                       <td className="px-3 py-1 font-medium text-slate-700">{r.Name}</td>
                       {FILL_COLUMNS.map((c) => (
                         <td key={c.field} className="px-2 py-1 text-slate-500">
-                          {edit || isBlank(r[c.rowKey]) ? (
+                          {full || isBlank(r[c.rowKey]) ? (
                             <input
-                              className={`input h-7 rounded-md px-2 py-0 text-xs ${c.width} ${edit ? '' : 'cursor-default bg-ink-50 shadow-none'}`}
-                              value={edit ? edit[c.field] : ''}
-                              readOnly={!edit}
-                              tabIndex={edit ? undefined : -1}
+                              className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
+                              value={typed?.[c.field] ?? cellText(r[c.rowKey])}
                               onChange={(e) => setCell(r.ItemId, c.field, e.target.value)}
-                              onKeyDown={(e) => { if (edit && e.key === 'Enter') saveRow(r); }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveRow(r); }}
                               inputMode={c.numeric ? 'decimal' : undefined}
-                              list={edit && c.list ? `fill-${c.list}` : undefined}
+                              list={c.list ? `fill-${c.list}` : undefined}
                               disabled={saving}
                             />
                           ) : r[c.rowKey]}
@@ -278,6 +308,16 @@ export default function ItemListNew() {
           {showRows && (
           <div ref={pagerRef} className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
             <span>Showing {firstRowNo}–{lastRowNo} of {rows.length} items</span>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={pendingRows.length === 0 || savingAll}
+              title={pendingRows.length ? 'Save every row you have typed into' : 'Type into the boxes, then save them all here'}
+              onClick={saveAll}
+            >
+              {savingAll ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              {savingAll ? 'Saving...' : `Save All${pendingRows.length ? ` (${pendingRows.length})` : ''}`}
+            </button>
             <div className="flex items-center gap-1">
               <button type="button" className="btn-ghost px-2 py-1" title="First page" disabled={currentPage === 1} onClick={() => goToPage(1)}><ChevronsLeft size={16} /></button>
               <button type="button" className="btn-ghost px-2 py-1" title="Previous page" disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)}><ChevronLeft size={16} /></button>
