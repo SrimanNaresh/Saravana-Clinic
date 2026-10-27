@@ -25,8 +25,11 @@ import { Download, Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-r
  *               aren't our template (e.g. an exported report with title rows
  *               above the headers), the first of the top 20 rows it accepts is
  *               used as the header row. Defaults to row 1 when none match.
+ *  - quietSuccess: optional — in inline mode, skip the floating notice for a
+ *               fully successful import (the page shows its own message);
+ *               errors and failed rows still show.
  */
-export default function BulkImport({ columns, sample = [], fileName = 'template', onImport, onDone, note, variant = 'panel', dropdowns, isHeaderRow }) {
+export default function BulkImport({ columns, sample = [], fileName = 'template', onImport, onDone, note, variant = 'panel', dropdowns, isHeaderRow, quietSuccess }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -196,7 +199,7 @@ export default function BulkImport({ columns, sample = [], fileName = 'template'
     return (
       <>
         <div className="flex flex-wrap gap-2">{buttons}</div>
-        {result && (
+        {result && !(quietSuccess && !result.error && !result.failed) && (
           <div className="fixed bottom-6 right-6 z-[60] w-80 max-w-[90vw] animate-fade-in rounded-xl bg-white p-3 shadow-elevated">
             {resultBlock}
           </div>

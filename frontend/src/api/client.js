@@ -164,6 +164,8 @@ export const pharmacyItemApi = {
   list: (search = '') => api.get('/pharmacy-items', { params: { search } }).then((r) => r.data),
   create: (data) => api.post('/pharmacy-items', data).then((r) => r.data),
   update: (id, data) => api.put(`/pharmacy-items/${id}`, data).then((r) => r.data),
+  // Changes only the template-keyed fields given, e.g. { GenericName, Rack }.
+  patch: (id, fields) => api.patch(`/pharmacy-items/${id}`, fields).then((r) => r.data),
   remove: (id) => api.delete(`/pharmacy-items/${id}`).then((r) => r.data),
   bulk: (rows) => api.post('/pharmacy-items/bulk', { rows }).then((r) => r.data),
 };

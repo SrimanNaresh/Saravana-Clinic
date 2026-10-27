@@ -39,6 +39,7 @@ import PurchaseMaster from './pages/pharmacy/PurchaseMaster.jsx';
 import PurchaseMasterList from './pages/pharmacy/PurchaseMasterList.jsx';
 import Item from './pages/pharmacy/Item.jsx';
 import ItemList from './pages/pharmacy/ItemList.jsx';
+import ItemListNew from './pages/pharmacy/ItemListNew.jsx';
 import Stock from './pages/pharmacy/Stock.jsx';
 import PurchaseInvoice from './pages/pharmacy/PurchaseInvoice.jsx';
 import PurchaseInvoiceList from './pages/pharmacy/PurchaseInvoiceList.jsx';
@@ -166,6 +167,7 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/supplier" element={<Supplier />} />
               <Route path="/pharmacy/item" element={<Item />} />
               <Route path="/pharmacy/item-list" element={<ItemList />} />
+              <Route path="/pharmacy/item-list-new" element={<ItemListNew />} />
               <Route path="/pharmacy/stock" element={<Stock />} />
               <Route path="/pharmacy/vendor-master" element={<VendorMaster />} />
               <Route path="/pharmacy/vendor-list" element={<VendorList />} />
