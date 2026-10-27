@@ -1,31 +1,160 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
-import { Package, Search, List, Pencil, Trash2, X, CheckCircle2, Save, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { Package, Search, List, X, CheckCircle2, Save, Loader2, Plus, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
-import { pharmacyItemApi } from '../../api/client.js';
+import { pharmacyItemApi, genericNameApi, manufacturerApi, unitApi } from '../../api/client.js';
 import { useItemMasters } from './itemFormParts.jsx';
 import ItemImport, { ITEM_LIST_TEMPLATE } from './ItemImport.jsx';
 
 const PAGE_SIZE = 30;
 
-// List columns after Item Name, in display order. An empty cell is always a
-// text box to type into; the row's Edit icon also opens its filled cells.
+// List columns after Item Name, in display order. An empty cell is a text box
+// to type into (saved with Enter or Save All); filled cells show as text.
 // `field` is the key the PATCH route takes, `rowKey` where the list row
 // carries the value, `list` the master whose names are suggested, `width`
 // the box's width.
 const FILL_COLUMNS = [
   { field: 'GenericName', rowKey: 'GenericNameName', list: 'genericNames', width: 'w-32' },
   { field: 'Manufacturer', rowKey: 'ManufacturerName', list: 'manufacturers', width: 'w-32' },
-  { field: 'HSNCode', rowKey: 'HSNCode', width: 'w-20' },
+  { field: 'HSNCode', rowKey: 'HSNCode', suggest: 'as new HSN code', width: 'w-20' },
   { field: 'MRP', rowKey: 'MRP', numeric: true, width: 'w-20' },
   { field: 'Unit', rowKey: 'UnitName', list: 'units', width: 'w-20' },
-  { field: 'GSTPercent', rowKey: 'GSTPercent', numeric: true, width: 'w-16' },
+  { field: 'GSTPercent', rowKey: 'GSTPercent', numeric: true, suggest: 'as new GST %', width: 'w-16' },
   { field: 'SellPrice', rowKey: 'SellPrice', numeric: true, width: 'w-20' },
-  { field: 'Rack', rowKey: 'Rack', width: 'w-16' },
-  { field: 'BoxNo', rowKey: 'BoxNo', width: 'w-16' },
+  { field: 'Rack', rowKey: 'Rack', suggest: 'as new rack', width: 'w-16' },
+  { field: 'BoxNo', rowKey: 'BoxNo', suggest: 'as new box no', width: 'w-16' },
 ];
+// HSN / GST / Rack / Box No (`suggest` set) have no master table: their dropdowns
+// list the values already used on items, and "Add" just keeps the typed
+// value (offered to the other rows too until the list reloads).
+const addLocal = (name) => Promise.resolve({ id: name, name });
 const isBlank = (v) => v === null || v === undefined || String(v).trim() === '';
 const cellText = (v) => (isBlank(v) ? '' : String(v));
+
+// How a master-backed box adds a brand-new name: the create call (returning
+// { id, name }), the useItemMasters() adder that remembers it, and the label.
+const MASTER_CREATE = {
+  genericNames: {
+    create: (name) => genericNameApi.create({ name }).then((r) => ({ id: r.GenericNameId, name: r.Name })),
+    adder: 'addGenericName', addLabel: 'as new generic name',
+  },
+  manufacturers: {
+    create: (name) => manufacturerApi.create({ name }).then((r) => ({ id: r.ManufacturerId, name: r.Name })),
+    adder: 'addManufacturer', addLabel: 'as new manufacturer',
+  },
+  units: {
+    create: (name) => unitApi.create({ name }).then((r) => ({ id: r.UnitId, name: r.Name })),
+    adder: 'addUnit', addLabel: 'as new unit',
+  },
+};
+const MAX_SUGGESTIONS = 50;
+
+// A table-cell text box with a searchable dropdown of master names, like the
+// Item screen's MasterPicker: typing filters the names, and a name that
+// matches none (ignoring case) offers an "Add" option that creates it in the
+// master right away. The dropdown is portalled with fixed positioning so the
+// table's scroll box doesn't clip it; it closes when anything scrolls.
+function CellCombo({ value, onChange, options, createFn, onCreated, addLabel, onEnter, className, disabled }) {
+  const inputRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState(null);
+  const [active, setActive] = useState(-1);
+  const [creating, setCreating] = useState(false);
+
+  const q = value.trim().toLowerCase();
+  const filtered = (q ? options.filter((o) => o.name.toLowerCase().includes(q)) : options).slice(0, MAX_SUGGESTIONS);
+  const exactMatch = options.some((o) => o.name.toLowerCase() === q);
+  const canAdd = !!q && !exactMatch;
+  // Keyboard order: the Add option (when shown) first, then the names.
+  const choices = [...(canAdd ? [{ add: true }] : []), ...filtered];
+
+  const openAt = () => {
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
+    setOpen(true);
+  };
+  const close = () => { setOpen(false); setActive(-1); };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onScroll = (e) => { if (!e.target.closest?.('[data-cell-combo]')) close(); };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', close);
+    return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', close); };
+  }, [open]);
+
+  const pick = (name) => { onChange(name); close(); };
+  const addNew = async () => {
+    const name = value.trim();
+    setCreating(true);
+    try {
+      const created = await createFn(name);
+      onCreated(created);
+      pick(created.name);
+    } catch {
+      // keep the dropdown open with the typed name so the user can retry
+    } finally {
+      setCreating(false);
+    }
+  };
+  const choose = (c) => (c.add ? addNew() : pick(c.name));
+
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) return openAt();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setActive((a) => Math.max(-1, Math.min(choices.length - 1, a + step)));
+    } else if (e.key === 'Enter') {
+      if (open && choices[active]) { e.preventDefault(); choose(choices[active]); } else { close(); onEnter?.(); }
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className={className}
+        value={value}
+        disabled={disabled}
+        onFocus={openAt}
+        onBlur={close}
+        onChange={(e) => { onChange(e.target.value); setActive(-1); openAt(); }}
+        onKeyDown={onKeyDown}
+        autoComplete="off"
+      />
+      {open && rect && choices.length > 0 && createPortal(
+        <div
+          data-cell-combo
+          className="fixed z-50 max-h-56 overflow-y-auto rounded-lg border border-ink-200 bg-white p-1 text-xs shadow-elevated"
+          style={{ top: rect.bottom + 2, left: rect.left, minWidth: Math.max(rect.width, 224) }}
+          // Keep focus in the box while clicking an option.
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {choices.map((c, i) => (
+            <button
+              key={c.add ? '__add' : c.id}
+              type="button"
+              onClick={() => choose(c)}
+              onMouseEnter={() => setActive(i)}
+              disabled={c.add && creating}
+              className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors disabled:opacity-50 ${
+                c.add ? 'font-medium text-brand-700' : 'text-ink-600'
+              } ${i === active ? (c.add ? 'bg-brand-50' : 'bg-ink-50') : ''}`}
+            >
+              {c.add
+                ? <><Plus size={13} /> {creating ? 'Adding...' : `Add "${value.trim()}" ${addLabel}`}</>
+                : <span className="truncate">{c.name}</span>}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 export default function ItemListNew() {
   const { toast, show } = useToast();
@@ -36,12 +165,12 @@ export default function ItemListNew() {
   const [notice, setNotice] = useState('');
   // Typed, unsaved box values: { [ItemId]: { [field]: value } }.
   const [editRows, setEditRows] = useState({});
-  // Rows opened with the Edit icon, whose filled cells become boxes too.
-  const [fullEditIds, setFullEditIds] = useState(() => new Set());
   const [savingId, setSavingId] = useState(null);
   const [savingAll, setSavingAll] = useState(false);
   const [search, setSearch] = useState('');
   const masters = useItemMasters();
+  // Values added from a `suggest` box's dropdown: { [field]: [name] }.
+  const [addedValues, setAddedValues] = useState({});
   const [page, setPage] = useState(1);
   const tableBoxRef = useRef(null);
   const pagerRef = useRef(null);
@@ -122,11 +251,18 @@ export default function ItemListNew() {
     tableBoxRef.current?.scrollTo({ top: 0 });
   };
 
-  const startEdit = (r) => setFullEditIds((s) => new Set(s).add(r.ItemId));
-  const stopEdit = (itemId) => {
-    setEditRows(({ [itemId]: _, ...rest }) => rest);
-    setFullEditIds((s) => { const next = new Set(s); next.delete(itemId); return next; });
-  };
+  // Distinct values per `suggest` column, from the loaded items plus any just added.
+  const suggestions = useMemo(() => Object.fromEntries(FILL_COLUMNS.filter((c) => c.suggest).map((c) => {
+    const seen = new Map();
+    [...rows.map((r) => cellText(r[c.rowKey]).trim()), ...(addedValues[c.field] || [])].forEach((v) => {
+      if (v && !seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), v);
+    });
+    const names = [...seen.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return [c.field, names.map((n) => ({ id: n, name: n }))];
+  })), [rows, addedValues]);
+  const rememberValue = (field) => (row) => setAddedValues((a) => ({ ...a, [field]: [...(a[field] || []), row.name] }));
+
+  const stopEdit = (itemId) => setEditRows(({ [itemId]: _, ...rest }) => rest);
   const setCell = (itemId, field, value) => setEditRows((e) => ({ ...e, [itemId]: { ...e[itemId], [field]: value } }));
 
   // The boxes on a row whose value changed. A box cleared to blank is left
@@ -178,17 +314,6 @@ export default function ItemListNew() {
     setSavingAll(false);
   };
 
-  const remove = async (row) => {
-    if (!confirm(`Delete item "${row.Name}"?`)) return;
-    try {
-      await pharmacyItemApi.remove(row.ItemId);
-      show('Item deleted', 'success');
-      load(search);
-    } catch (err) {
-      show(err.response?.data?.error || 'Delete failed', 'error');
-    }
-  };
-
   return (
     <div>
       <div className="card">
@@ -218,14 +343,6 @@ export default function ItemListNew() {
             </div>
           )}
 
-          {/* Name suggestions for the Generic Name / Menu Factor / Unit boxes;
-              a new name is added to its master on save. */}
-          {FILL_COLUMNS.filter((c) => c.list).map((c) => (
-            <datalist key={c.list} id={`fill-${c.list}`}>
-              {masters[c.list].map((m) => <option key={m.id} value={m.name} />)}
-            </datalist>
-          ))}
-
           {/* The table scrolls inside its own viewport-sized box (with its own
               scrollbar) so long lists stay navigable and the header stays pinned.
               Its headers show even while empty, with the status in the body. */}
@@ -240,21 +357,20 @@ export default function ItemListNew() {
                   <th className="rounded-l-lg px-3 py-1.5">Item Code</th>
                   <th className="px-3 py-1.5">Item Name</th>
                   <th className="px-3 py-1.5">Generic Name</th>
-                  <th className="px-3 py-1.5">Menu Factor</th>
+                  <th className="px-3 py-1.5">Manufacturer</th>
                   <th className="px-3 py-1.5">HSN</th>
                   <th className="px-3 py-1.5">MRP</th>
                   <th className="px-3 py-1.5">Unit</th>
                   <th className="px-3 py-1.5">GST</th>
                   <th className="px-3 py-1.5">Sell Price</th>
                   <th className="px-3 py-1.5">Rack</th>
-                  <th className="px-3 py-1.5">Box No</th>
-                  <th className="rounded-r-lg px-3 py-1.5 text-right">Actions</th>
+                  <th className="rounded-r-lg px-3 py-1.5">Box No</th>
                 </tr>
               </thead>
               <tbody>
                 {!showRows ? (
                   <tr>
-                    <td colSpan={12}>
+                    <td colSpan={11}>
                       {listShown && loading ? <Spinner /> : (
                         <EmptyState message={listShown ? 'No items found.' : 'No items to show. Upload an item sheet or click View List.'} />
                       )}
@@ -262,43 +378,49 @@ export default function ItemListNew() {
                   </tr>
                 ) : pageRows.map((r) => {
                   const typed = editRows[r.ItemId];
-                  const full = fullEditIds.has(r.ItemId);
-                  const edit = !!typed || full; // typing or the Edit icon puts the row in edit mode
                   const saving = savingId === r.ItemId || (savingAll && !!typed);
                   return (
-                    <tr key={r.ItemId} className={`table-row ${edit ? 'bg-brand-50/40' : ''}`}>
+                    <tr key={r.ItemId} className={`table-row ${typed ? 'bg-brand-50/40' : ''}`}>
                       <td className="px-3 py-1 text-slate-500">{r.ItemCode}</td>
                       <td className="px-3 py-1 font-medium text-slate-700">{r.Name}</td>
                       {FILL_COLUMNS.map((c) => (
                         <td key={c.field} className="px-2 py-1 text-slate-500">
-                          {full || isBlank(r[c.rowKey]) ? (
+                          {!isBlank(r[c.rowKey]) ? r[c.rowKey] : c.list ? (
+                            <CellCombo
+                              className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
+                              value={typed?.[c.field] ?? ''}
+                              onChange={(v) => setCell(r.ItemId, c.field, v)}
+                              options={masters[c.list]}
+                              createFn={MASTER_CREATE[c.list].create}
+                              onCreated={masters[MASTER_CREATE[c.list].adder]}
+                              addLabel={MASTER_CREATE[c.list].addLabel}
+                              onEnter={() => saveRow(r)}
+                              disabled={saving}
+                            />
+                          ) : c.suggest ? (
+                            <CellCombo
+                              className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
+                              value={typed?.[c.field] ?? ''}
+                              onChange={(v) => setCell(r.ItemId, c.field, v)}
+                              options={suggestions[c.field]}
+                              createFn={addLocal}
+                              onCreated={rememberValue(c.field)}
+                              addLabel={c.suggest}
+                              onEnter={() => saveRow(r)}
+                              disabled={saving}
+                            />
+                          ) : (
                             <input
                               className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
-                              value={typed?.[c.field] ?? cellText(r[c.rowKey])}
+                              value={typed?.[c.field] ?? ''}
                               onChange={(e) => setCell(r.ItemId, c.field, e.target.value)}
                               onKeyDown={(e) => { if (e.key === 'Enter') saveRow(r); }}
                               inputMode={c.numeric ? 'decimal' : undefined}
-                              list={c.list ? `fill-${c.list}` : undefined}
                               disabled={saving}
                             />
-                          ) : r[c.rowKey]}
+                          )}
                         </td>
                       ))}
-                      <td className="px-3 py-1">
-                        <div className="flex justify-end gap-1">
-                          {edit ? (
-                            <>
-                              <button type="button" className="btn-ghost px-2 py-1 text-emerald-600 hover:bg-emerald-50" title="Save item" disabled={saving} onClick={() => saveRow(r)}>
-                                {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                              </button>
-                              <button type="button" className="btn-ghost px-2 py-1" title="Cancel editing" disabled={saving} onClick={() => stopEdit(r.ItemId)}><X size={15} /></button>
-                            </>
-                          ) : (
-                            <button type="button" className="btn-ghost px-2 py-1" title="Edit item" onClick={() => startEdit(r)}><Pencil size={15} /></button>
-                          )}
-                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete item" disabled={saving} onClick={() => remove(r)}><Trash2 size={15} /></button>
-                        </div>
-                      </td>
                     </tr>
                   );
                 })}

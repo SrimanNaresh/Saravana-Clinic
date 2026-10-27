@@ -24,9 +24,9 @@ const FULL_TEMPLATE = {
 // the same fields through HEADER_MAP below.
 export const ITEM_LIST_TEMPLATE = {
   fileName: 'pharmacy-item-list',
-  columns: ['Item Code', 'Item Name', 'Generic Name', 'Menu Factor', 'HSN', 'MRP', 'Unit', 'GST', 'Sell Price', 'Rack', 'Box No'],
+  columns: ['Item Code', 'Item Name', 'Generic Name', 'Manufacturer', 'HSN', 'MRP', 'Unit', 'GST', 'Sell Price', 'Rack', 'Box No'],
   sample: [['', 'Paracetamol 500mg', 'Acetaminophen', 'GSK', '3004', '18.00', 'Strip', '12', '15.00', 'R1', 'B12']],
-  note: 'Leave Item Code blank to add a new item, or keep an existing code (e.g. ITM000042) to update that item. Only Item Name is required — Generic Name, Menu Factor and Unit accept any value from their dropdown, or a brand-new one. A price list with Qty fills Unit. Updating an item only changes the columns in this sheet.',
+  note: 'Leave Item Code blank to add a new item, or keep an existing code (e.g. ITM000042) to update that item. Only Item Name is required — Generic Name, Manufacturer and Unit accept any value from their dropdown, or a brand-new one. A price list with Qty fills Unit. Updating an item only changes the columns in this sheet.',
   // The clinic's price-list sheets carry "Qty" where this screen shows Unit.
   aliases: { qty: 'Unit', quantity: 'Unit' },
 };
