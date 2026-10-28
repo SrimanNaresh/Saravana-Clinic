@@ -135,6 +135,14 @@ export const purchaseMasterApi = {
   remove: (id) => api.delete(`/purchase-masters/${id}`).then((r) => r.data),
 };
 
+export const stockInwardApi = {
+  list: (search = '') => api.get('/stock-inwards', { params: { search } }).then((r) => r.data),
+  create: (data) => api.post('/stock-inwards', data).then((r) => r.data),
+  update: (id, data) => api.put(`/stock-inwards/${id}`, data).then((r) => r.data),
+  bulk: (rows) => api.post('/stock-inwards/bulk', { rows }).then((r) => r.data),
+  remove: (id) => api.delete(`/stock-inwards/${id}`).then((r) => r.data),
+};
+
 export const genericNameApi = {
   list: (search = '') => api.get('/generic-names', { params: { search } }).then((r) => r.data),
   create: (data) => api.post('/generic-names', data).then((r) => r.data),

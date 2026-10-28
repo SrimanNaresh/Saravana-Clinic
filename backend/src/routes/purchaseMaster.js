@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
+import { num, text, blank, importRowBody, addedNote } from './_purchaseRows.js';
 
 const router = Router();
 
@@ -22,8 +23,6 @@ function validate({ itemId, vendorId, quantity }) {
   if (quantity === '' || quantity == null || !(Number(quantity) > 0)) return 'Qty must be a number greater than 0';
   return null;
 }
-
-const num = (v) => (v === '' || v === undefined || v === null ? null : Number(v));
 
 function bindFields(request, body) {
   return request
@@ -78,66 +77,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Net Price = Qty x Current Price, less Discount %, plus GST % on the
-// discounted amount (same as the Purchase Master form). Null without a price.
-function netPriceOf({ quantity, currentPrice, gstPercent, discountPercent }) {
-  const qty = Number(quantity);
-  const price = num(currentPrice);
-  if (!(qty > 0) || price === null || Number.isNaN(price)) return null;
-  const afterDiscount = qty * price * (1 - (Number(discountPercent) || 0) / 100);
-  return Number((afterDiscount * (1 + (Number(gstPercent) || 0) / 100)).toFixed(2));
-}
-
-const text = (v) => (v ?? '').toString().trim();
-const blank = (v) => text(v) === '';
-
-// Looks up an active row by name (case-insensitive); null when there's none.
-async function findByName(pool, table, idCol, nameCol, name) {
-  const result = await pool
-    .request()
-    .input('name', sql.NVarChar, name)
-    .query(`SELECT TOP 1 * FROM ${table} WHERE LOWER(${nameCol}) = LOWER(@name) AND IsActive = 1 ORDER BY ${idCol}`);
-  return result.recordset[0] || null;
-}
-
-// Like findByName, but adds the name to the master when it's new — the same
-// as typing a new manufacturer / unit into the form's dropdown.
-async function resolveMasterId(pool, table, idCol, name) {
-  if (!name) return null;
-  const existing = await findByName(pool, table, idCol, 'Name', name);
-  if (existing) return existing[idCol];
-  const inserted = await pool
-    .request()
-    .input('name', sql.NVarChar, name)
-    .query(`INSERT INTO ${table} (Name) OUTPUT INSERTED.${idCol} AS id VALUES (@name)`);
-  return inserted.recordset[0].id;
-}
-
-// Adds an item that isn't in Item Master yet, from what the purchase row says
-// about it (Current Price becomes its purchase rate).
-async function createItem(pool, name, r, manufacturerId, unitId) {
-  const result = await pool
-    .request()
-    .input('name', sql.NVarChar, name)
-    .input('hsnCode', sql.NVarChar(20), text(r.HSN) || null)
-    .input('manufacturerId', sql.Int, manufacturerId)
-    .input('unitId', sql.Int, unitId)
-    .input('gstPercent', sql.Decimal(5, 2), num(r.GST))
-    .input('discountPercent', sql.Decimal(5, 2), num(r.Discount))
-    .input('purchaseRate', sql.Decimal(10, 2), num(r.CurrentPrice))
-    .query(`
-      INSERT INTO PharmacyItem (Name, HSNCode, ManufacturerId, UnitId, GSTPercent, DiscountPercent, PurchaseRate)
-      OUTPUT INSERTED.*
-      VALUES (@name, @hsnCode, @manufacturerId, @unitId, @gstPercent, @discountPercent, @purchaseRate)
-    `);
-  return result.recordset[0];
-}
-
-// Excel import: rows keyed ItemName, HSN, Manufacturer, Vendor, Qty, Unit,
-// OldPrice, CurrentPrice, GST, Discount, NetPrice. Every row is a new purchase
-// entry. An item, vendor, manufacturer or unit not on file yet is added
-// (names match ignoring case). Blank HSN / Manufacturer / Unit / GST /
-// Discount / Old Price are filled from the item, as picking it in the form does.
+// Excel import: every row is a new purchase entry (see importRowBody).
 router.post('/bulk', async (req, res) => {
   const { rows } = req.body;
   if (!Array.isArray(rows) || rows.length === 0) {
@@ -145,57 +85,12 @@ router.post('/bulk', async (req, res) => {
   }
   const pool = await getPool();
   let inserted = 0;
-  const newItems = [];
-  const newVendors = [];
+  const added = { items: [], vendors: [] };
   const errors = [];
 
   for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
     try {
-      const itemName = text(r.ItemName);
-      const vendorName = text(r.Vendor);
-      if (!itemName) throw new Error('Item Name is required');
-      if (!vendorName) throw new Error('Vendor is required');
-      if (!(Number(r.Qty) > 0)) throw new Error('Qty must be a number greater than 0');
-      const rowManufacturerId = blank(r.Manufacturer)
-        ? null : await resolveMasterId(pool, 'ManufacturerMaster', 'ManufacturerId', text(r.Manufacturer));
-      const rowUnitId = blank(r.Unit) ? null : await resolveMasterId(pool, 'UnitMaster', 'UnitId', text(r.Unit));
-
-      let item = await findByName(pool, 'PharmacyItem', 'ItemId', 'Name', itemName);
-      if (!item) {
-        item = await createItem(pool, itemName, r, rowManufacturerId, rowUnitId);
-        newItems.push(itemName);
-      }
-      let vendor = await findByName(pool, 'Vendor', 'VendorId', 'VendorName', vendorName);
-      if (!vendor) {
-        vendor = (await pool.request().input('name', sql.NVarChar(200), vendorName)
-          .query('INSERT INTO Vendor (VendorName) OUTPUT INSERTED.* VALUES (@name)')).recordset[0];
-        newVendors.push(vendorName);
-      }
-
-      let oldPrice = r.OldPrice;
-      if (blank(oldPrice)) {
-        const last = await pool
-          .request()
-          .input('itemId', sql.Int, item.ItemId)
-          .query(`SELECT TOP 1 CurrentPrice FROM PurchaseMaster
-                  WHERE ItemId = @itemId AND IsActive = 1 AND CurrentPrice IS NOT NULL
-                  ORDER BY PurchaseMasterId DESC`);
-        oldPrice = last.recordset[0]?.CurrentPrice ?? item.PurchaseRate;
-      }
-      const body = {
-        itemId: item.ItemId,
-        hsnCode: blank(r.HSN) ? item.HSNCode : text(r.HSN),
-        manufacturerId: rowManufacturerId ?? item.ManufacturerId,
-        vendorId: vendor.VendorId,
-        quantity: r.Qty,
-        unitId: rowUnitId ?? item.UnitId,
-        oldPrice,
-        currentPrice: r.CurrentPrice,
-        gstPercent: blank(r.GST) ? item.GSTPercent : r.GST,
-        discountPercent: blank(r.Discount) ? item.DiscountPercent : r.Discount,
-      };
-      body.netPrice = netPriceOf(body) ?? r.NetPrice;
+      const body = await importRowBody(pool, rows[i], { priceTable: 'PurchaseMaster', priceIdCol: 'PurchaseMasterId' }, added);
       const error = validate(body);
       if (error) throw new Error(error);
       await bindFields(pool.request(), body).query(`
@@ -209,12 +104,7 @@ router.post('/bulk', async (req, res) => {
       errors.push({ row: i + 1, error: err.message });
     }
   }
-  const added = [
-    newItems.length && `${newItems.length} new item${newItems.length === 1 ? '' : 's'} (${newItems.join(', ')})`,
-    newVendors.length && `${newVendors.length} new vendor${newVendors.length === 1 ? '' : 's'} (${newVendors.join(', ')})`,
-  ].filter(Boolean);
-  const note = added.length ? `Also added ${added.join(' and ')}.` : undefined;
-  res.json({ inserted, updated: 0, failed: errors.length, errors, note });
+  res.json({ inserted, updated: 0, failed: errors.length, errors, note: addedNote(added) });
 });
 
 // Fields the form's dropdowns list by value (no master table), with the SQL

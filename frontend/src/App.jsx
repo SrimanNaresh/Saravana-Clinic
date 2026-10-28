@@ -41,6 +41,8 @@ import Item from './pages/pharmacy/Item.jsx';
 import ItemList from './pages/pharmacy/ItemList.jsx';
 import ItemListNew from './pages/pharmacy/ItemListNew.jsx';
 import Stock from './pages/pharmacy/Stock.jsx';
+import StockInward from './pages/pharmacy/StockInward.jsx';
+import StockInwardList from './pages/pharmacy/StockInwardList.jsx';
 import PurchaseInvoice from './pages/pharmacy/PurchaseInvoice.jsx';
 import PurchaseInvoiceList from './pages/pharmacy/PurchaseInvoiceList.jsx';
 import PurchaseReturn from './pages/pharmacy/PurchaseReturn.jsx';
@@ -169,6 +171,8 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/item-list" element={<ItemList />} />
               <Route path="/pharmacy/item-list-new" element={<ItemListNew />} />
               <Route path="/pharmacy/stock" element={<Stock />} />
+              <Route path="/pharmacy/stock-inward" element={<StockInward />} />
+              <Route path="/pharmacy/stock-inward-list" element={<StockInwardList />} />
               <Route path="/pharmacy/vendor-master" element={<VendorMaster />} />
               <Route path="/pharmacy/vendor-list" element={<VendorList />} />
               <Route path="/pharmacy/purchase-master" element={<PurchaseMaster />} />

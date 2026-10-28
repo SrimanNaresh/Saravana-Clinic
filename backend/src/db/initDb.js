@@ -634,6 +634,60 @@ IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscountPercent' AND Object
     ALTER TABLE PurchaseMaster ADD DiscountPercent DECIMAL(5,2) NULL;
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='NetPrice' AND Object_ID=Object_ID('PurchaseMaster'))
     ALTER TABLE PurchaseMaster ADD NetPrice DECIMAL(12,2) NULL;
+
+-- Purchase Return's single-entry form: the bill's date and vendor on the
+-- header, and the line's HSN / manufacturer / unit and pricing (as on Stock
+-- Inward). Current Price is also the line's Rate, Net Price its Amount.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='BillDate' AND Object_ID=Object_ID('PurchaseReturn'))
+    ALTER TABLE PurchaseReturn ADD BillDate DATE NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='VendorId' AND Object_ID=Object_ID('PurchaseReturn'))
+    ALTER TABLE PurchaseReturn ADD VendorId INT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='HSNCode' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD HSNCode NVARCHAR(20) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='ManufacturerId' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD ManufacturerId INT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='UnitId' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD UnitId INT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='OldPrice' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD OldPrice DECIMAL(10,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='CurrentPrice' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD CurrentPrice DECIMAL(10,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='GSTPercent' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD GSTPercent DECIMAL(5,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscountPercent' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD DiscountPercent DECIMAL(5,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='NetPrice' AND Object_ID=Object_ID('PurchaseReturnItem'))
+    ALTER TABLE PurchaseReturnItem ADD NetPrice DECIMAL(12,2) NULL;
+
+-- Pharmacy > Stock > Inward: stock received against a Purchase Invoice (its
+-- Purchase Code), batch by batch. Counted as purchased stock on the Stock
+-- screen. ExpiryDate is stored as the last day of the expiry month.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockInward' AND xtype='U')
+CREATE TABLE StockInward (
+    StockInwardId     INT IDENTITY(1,1) PRIMARY KEY,
+    PurchaseInvoiceId INT NULL,
+    BillDate          DATE NULL,
+    ItemId            INT NOT NULL,
+    HSNCode           NVARCHAR(20) NULL,
+    ManufacturerId    INT NULL,
+    VendorId          INT NOT NULL,
+    Quantity          DECIMAL(10,2) NOT NULL,
+    UnitId            INT NULL,
+    Batch             NVARCHAR(50) NULL,
+    ExpiryDate        DATE NULL,
+    OldPrice          DECIMAL(10,2) NULL,
+    CurrentPrice      DECIMAL(10,2) NULL,
+    GSTPercent        DECIMAL(5,2) NULL,
+    DiscountPercent   DECIMAL(5,2) NULL,
+    NetPrice          DECIMAL(12,2) NULL,
+    IsActive          BIT NOT NULL DEFAULT 1,
+    CreatedAt         DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_StockInward_Invoice FOREIGN KEY (PurchaseInvoiceId) REFERENCES PurchaseInvoice(PurchaseInvoiceId),
+    CONSTRAINT FK_StockInward_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId),
+    CONSTRAINT FK_StockInward_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId),
+    CONSTRAINT FK_StockInward_Unit FOREIGN KEY (UnitId) REFERENCES UnitMaster(UnitId),
+    CONSTRAINT FK_StockInward_Manufacturer FOREIGN KEY (ManufacturerId) REFERENCES ManufacturerMaster(ManufacturerId)
+);
 `;
 
 async function init() {

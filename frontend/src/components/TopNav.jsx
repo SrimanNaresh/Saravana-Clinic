@@ -4,7 +4,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Pill, ClipboardList, UserPlus, UserCheck,
   FileText, ChevronDown, ChevronRight, Stethoscope, Settings, Receipt, MessageCircle, TestTube, Sparkles, Package, Building2,
-  ShoppingCart,
+  ShoppingCart, Boxes,
 } from 'lucide-react';
 import { MENU_GROUPS } from '../config/menuItems.js';
 import { menuAccessApi } from '../api/client.js';
@@ -31,6 +31,7 @@ const SUBMENU_ICONS = {
   "Coming Up's": Sparkles,
   Purchase: ShoppingCart,
   Sales: Receipt,
+  Stock: Boxes,
 };
 
 // A leaf has `to`; a node has `submenu` (an array of further leaves/nodes,

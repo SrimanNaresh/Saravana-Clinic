@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Undo2, Trash2, Pencil, ChevronDown, ChevronRight, X, Search } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
-import { purchaseReturnApi } from '../../api/client.js';
+import { purchaseReturnApi, vendorApi } from '../../api/client.js';
 
 function formatExpiry(iso) {
   if (!iso) return '-';
@@ -33,6 +33,12 @@ export default function PurchaseReturnList() {
   const [fromDate, setFromDate] = useState(defaultFromDate);
   const [toDate, setToDate] = useState('');
   const [search, setSearch] = useState('');
+  // VendorId -> name. Returns saved before the Vendor field show their Supplier.
+  const [vendorNames, setVendorNames] = useState({});
+
+  useEffect(() => {
+    vendorApi.list().then((r) => setVendorNames(Object.fromEntries(r.map((v) => [v.VendorId, v.VendorName])))).catch(() => {});
+  }, []);
 
   const load = useCallback(async (q = '') => {
     setLoading(true);
@@ -135,7 +141,7 @@ export default function PurchaseReturnList() {
                   <th className="rounded-l-lg px-3 py-1.5" />
                   <th className="px-3 py-1.5">Code</th>
                   <th className="px-3 py-1.5">Date</th>
-                  <th className="px-3 py-1.5">Supplier</th>
+                  <th className="px-3 py-1.5">Vendor</th>
                   <th className="px-3 py-1.5">Against Invoice</th>
                   <th className="px-3 py-1.5">Total</th>
                   <th className="rounded-r-lg px-3 py-1.5 text-right">Actions</th>
@@ -152,7 +158,7 @@ export default function PurchaseReturnList() {
                       </td>
                       <td className="px-3 py-1.5 text-slate-500">{r.Code}</td>
                       <td className="px-3 py-1.5 text-slate-500">{new Date(r.TransDate).toLocaleDateString()}</td>
-                      <td className="px-3 py-1.5 font-medium text-slate-700">{r.SupplierName || '-'}</td>
+                      <td className="px-3 py-1.5 font-medium text-slate-700">{vendorNames[r.VendorId] || r.SupplierName || '-'}</td>
                       <td className="px-3 py-1.5 text-slate-500">{r.PurchaseInvoiceId ? invoiceCode(r.PurchaseInvoiceId) : '-'}</td>
                       <td className="px-3 py-1.5 text-slate-500">{Number(r.TotalAmount).toFixed(2)}</td>
                       <td className="px-3 py-1.5">

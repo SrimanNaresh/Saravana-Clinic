@@ -1,156 +1,180 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Undo2, Save, X } from 'lucide-react';
-import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
-import SearchSelect from '../../components/SearchSelect.jsx';
+import { Undo2, Save, X, List } from 'lucide-react';
+import { CardHeader, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
-import { purchaseInvoiceApi, purchaseReturnApi } from '../../api/client.js';
+import {
+  pharmacyItemApi, vendorApi, unitApi, manufacturerApi, purchaseInvoiceApi, purchaseReturnApi,
+} from '../../api/client.js';
+import { MasterPicker } from './itemFormParts.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-function formatExpiry(iso) {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
+const emptyForm = () => ({
+  purchaseInvoiceId: '', billDate: '', returnDate: today(),
+  itemId: '', hsnCode: '', manufacturerId: '', vendorId: '', quantity: '', unitId: '', batch: '', expiryMonth: '',
+  oldPrice: '', currentPrice: '', gstPercent: '', discountPercent: '',
+});
+
+const orBlank = (v) => (v === null || v === undefined ? '' : v);
+// API dates come as ISO strings; the date box takes YYYY-MM-DD, the month box YYYY-MM.
+const isoPart = (v, len) => (v ? String(v).slice(0, len) : '');
+// Exp Date is kept as the last day of its month.
+function monthEnd(ym) {
+  if (!ym) return null;
+  const [y, m] = ym.split('-').map(Number);
+  return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
 }
-// Purchase Return is raised against a specific Purchase Invoice: picking the
-// invoice pulls in its line items (item, batch, expiry, rate) so the return
-// can only cover what was actually bought on that invoice — each line's
-// Return Qty defaults to blank (not returned) and is capped at what was
-// purchased on that line.
+
+// Net Price = Qty x Current Price, less Discount %, plus GST % on the
+// discounted amount. Blank until Qty and Current Price are filled.
+function netPriceOf({ quantity, currentPrice, gstPercent, discountPercent }) {
+  const qty = Number(quantity);
+  const price = Number(currentPrice);
+  if (!(qty > 0) || currentPrice === '' || Number.isNaN(price)) return '';
+  const afterDiscount = qty * price * (1 - (Number(discountPercent) || 0) / 100);
+  return (afterDiscount * (1 + (Number(gstPercent) || 0) / 100)).toFixed(2);
+}
+
+// A saved return (list row) and its one line back into the form. Returns saved
+// before this form have only item / qty / batch / expiry / rate, and their
+// rate shows as Current Price.
+const savedToForm = (row, line) => ({
+  purchaseInvoiceId: row.PurchaseInvoiceId ?? '', billDate: isoPart(row.BillDate, 10),
+  returnDate: isoPart(row.TransDate, 10) || today(), vendorId: row.VendorId ?? '',
+  itemId: line?.ItemId ?? '', hsnCode: orBlank(line?.HSNCode), manufacturerId: line?.ManufacturerId ?? '',
+  quantity: orBlank(line?.Quantity), unitId: line?.UnitId ?? '', batch: orBlank(line?.Batch),
+  expiryMonth: isoPart(line?.ExpiryDate, 7), oldPrice: orBlank(line?.OldPrice),
+  currentPrice: orBlank(line?.CurrentPrice ?? line?.Rate), gstPercent: orBlank(line?.GSTPercent),
+  discountPercent: orBlank(line?.DiscountPercent),
+});
+
 export default function PurchaseReturn() {
-  const { toast, show } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
-  const [invoices, setInvoices] = useState([]);
-  const [invoiceId, setInvoiceId] = useState('');
-  const [transDate, setTransDate] = useState(today());
-  const [lines, setLines] = useState([]);
-  const [loadingLines, setLoadingLines] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const { toast, show } = useToast();
+  const [form, setForm] = useState(emptyForm);
+  // Set when Return List's Edit opened a record here; null while adding a new one.
   const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [items, setItems] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [units, setUnits] = useState([]);
+  const [manufacturers, setManufacturers] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+
+  const loadInvoices = useCallback(() => purchaseInvoiceApi.list()
+    .then((r) => setInvoices(r.map((p) => ({
+      id: p.PurchaseInvoiceId, name: p.Code, date: isoPart(p.TransDate, 10), supplierId: p.SupplierId,
+    }))))
+    .catch(() => show('Failed to load purchase codes', 'error')), [show]);
 
   useEffect(() => {
-    purchaseInvoiceApi.list().then(setInvoices).catch(() => setInvoices([]));
-  }, []);
+    pharmacyItemApi.list().then((r) => setItems(r.map((i) => ({
+      id: i.ItemId, name: i.Name, unitId: i.UnitId, hsnCode: i.HSNCode, manufacturerId: i.ManufacturerId,
+      gstPercent: i.GSTPercent, discountPercent: i.DiscountPercent, purchaseRate: i.PurchaseRate,
+    })))).catch(() => show('Failed to load items', 'error'));
+    vendorApi.list().then((r) => setVendors(r.map((v) => ({ id: v.VendorId, name: v.VendorName }))))
+      .catch(() => show('Failed to load vendors', 'error'));
+    manufacturerApi.list().then((r) => setManufacturers(r.map((m) => ({ id: m.ManufacturerId, name: m.Name }))))
+      .catch(() => show('Failed to load manufacturers', 'error'));
+    unitApi.list().then((r) => setUnits(r.map((u) => ({ id: u.UnitId, name: u.Name }))))
+      .catch(() => show('Failed to load units', 'error'));
+    loadInvoices();
+  }, [show, loadInvoices]);
 
-  const invoiceOptions = invoices.map((inv) => ({
-    value: String(inv.PurchaseInvoiceId),
-    label: `${inv.Code} — ${inv.SupplierName || '-'} — ${new Date(inv.TransDate).toLocaleDateString()}`,
-  }));
-  const selectedInvoice = invoices.find((inv) => String(inv.PurchaseInvoiceId) === invoiceId);
+  // Return List hands off a row to edit via navigation state; load it (and
+  // its line) once, then clear the state so a refresh starts blank again.
+  useEffect(() => {
+    const row = location.state?.editReturn;
+    if (!row) return;
+    navigate(location.pathname, { replace: true, state: null });
+    purchaseReturnApi.items(row.PurchaseReturnId)
+      .then((lines) => {
+        setForm(savedToForm(row, lines[0]));
+        setEditingId(row.PurchaseReturnId);
+        if (lines.length > 1) show('This return has more than one item — only the first is shown, and saving keeps just that one', 'error');
+      })
+      .catch(() => show('Failed to load return for editing', 'error'));
+  }, [location.state, location.pathname, navigate, show]);
 
-  const loadInvoiceLines = async (id) => {
-    const items = await purchaseInvoiceApi.items(id);
-    return items.map((it) => ({
-      key: it.LineId,
-      itemId: it.ItemId,
-      itemName: it.ItemName,
-      batch: it.Batch,
-      expiryDate: it.ExpiryDate,
-      purchasedQty: Number(it.Quantity),
-      rate: it.Rate,
-      returnQty: '',
+  const set = (key, value) => setForm((c) => ({ ...c, [key]: value }));
+
+  // Picking a Purchase Code fills Bill Date with that invoice's date.
+  const pickInvoice = (id) => {
+    const invoice = invoices.find((p) => String(p.id) === String(id));
+    setForm((c) => ({ ...c, purchaseInvoiceId: id, billDate: invoice?.date || c.billDate }));
+  };
+
+  // Picking an item fills in what Item Master knows about it (HSN,
+  // manufacturer, unit, GST, discount, and its purchase rate as Old Price).
+  // Everything stays editable.
+  const pickItem = (id) => {
+    const item = items.find((i) => String(i.id) === String(id));
+    if (!item) return set('itemId', id);
+    setForm((c) => ({
+      ...c,
+      itemId: id,
+      hsnCode: orBlank(item.hsnCode) || c.hsnCode,
+      manufacturerId: orBlank(item.manufacturerId) || c.manufacturerId,
+      unitId: orBlank(item.unitId) || c.unitId,
+      gstPercent: orBlank(item.gstPercent),
+      discountPercent: orBlank(item.discountPercent),
+      oldPrice: orBlank(item.purchaseRate),
     }));
   };
+  const netPrice = netPriceOf(form);
+  const num = (key, placeholder = '0.00') => ({
+    type: 'number', min: '0', step: 'any', inputMode: 'decimal', className: 'input', placeholder,
+    value: form[key], onChange: (e) => set(key, e.target.value),
+  });
 
-  const pickInvoice = async (id) => {
-    setInvoiceId(id);
-    setLines([]);
-    if (!id) return;
-    setLoadingLines(true);
-    try {
-      setLines(await loadInvoiceLines(id));
-    } catch {
-      show('Failed to load invoice items', 'error');
-    } finally {
-      setLoadingLines(false);
-    }
+  const backToList = () => navigate('/pharmacy/purchase-return-list');
+
+  const cancel = () => {
+    if (editingId) return backToList();
+    setForm(emptyForm());
   };
-
-  const resetForm = () => {
-    setEditingId(null);
-    setInvoiceId('');
-    setLines([]);
-    setTransDate(today());
-  };
-
-  // Loads a saved return back into the form for editing: re-loads the full
-  // line set from its source invoice (so items not previously returned are
-  // still selectable), then overlays the saved quantities/rates onto the
-  // matching lines.
-  const startEdit = async (row) => {
-    if (!row.PurchaseInvoiceId) {
-      show('This return has no linked invoice to edit', 'error');
-      return;
-    }
-    setLoadingLines(true);
-    try {
-      const [invoiceLines, savedItems] = await Promise.all([
-        loadInvoiceLines(row.PurchaseInvoiceId),
-        purchaseReturnApi.items(row.PurchaseReturnId),
-      ]);
-      const merged = invoiceLines.map((l) => {
-        const saved = savedItems.find((s) => s.ItemId === l.itemId);
-        return saved ? { ...l, returnQty: String(saved.Quantity), rate: saved.Rate } : l;
-      });
-      setEditingId(row.PurchaseReturnId);
-      setInvoiceId(String(row.PurchaseInvoiceId));
-      setTransDate(new Date(row.TransDate).toISOString().slice(0, 10));
-      setLines(merged);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      show('Failed to load return for editing', 'error');
-    } finally {
-      setLoadingLines(false);
-    }
-  };
-
-  // The List page hands off a row to edit via navigation state; load it once,
-  // then clear the state so a later refresh of this page starts blank again.
-  useEffect(() => {
-    if (location.state?.editReturn) {
-      startEdit(location.state.editReturn);
-      navigate(location.pathname, { replace: true, state: null });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-
-  const total = lines.reduce((sum, l) => sum + (Number(l.returnQty) || 0) * (Number(l.rate) || 0), 0);
 
   const save = async (e) => {
     e.preventDefault();
-    const validLines = lines.filter((l) => Number(l.returnQty) > 0);
-    if (!invoiceId) return show('Select an invoice to return against', 'error');
-    if (validLines.length === 0) return show('Enter a return quantity for at least one item', 'error');
+    if (!form.itemId) return show('Select an item', 'error');
+    if (!form.vendorId) return show('Select a vendor', 'error');
+    if (!(Number(form.quantity) > 0)) return show('Qty must be a number greater than 0', 'error');
+    const invoice = invoices.find((p) => String(p.id) === String(form.purchaseInvoiceId));
+    const payload = {
+      transDate: form.returnDate,
+      billDate: form.billDate || null,
+      vendorId: form.vendorId,
+      purchaseInvoiceId: form.purchaseInvoiceId || null,
+      supplierId: invoice?.supplierId || null,
+      items: [{
+        itemId: form.itemId,
+        quantity: Number(form.quantity),
+        rate: Number(form.currentPrice) || 0,
+        amount: netPrice === '' ? 0 : Number(netPrice),
+        batch: form.batch,
+        expiryDate: monthEnd(form.expiryMonth),
+        hsnCode: form.hsnCode,
+        manufacturerId: form.manufacturerId,
+        unitId: form.unitId,
+        oldPrice: form.oldPrice,
+        currentPrice: form.currentPrice,
+        gstPercent: form.gstPercent,
+        discountPercent: form.discountPercent,
+        netPrice,
+      }],
+    };
     setSaving(true);
     try {
-      const payload = {
-        transDate,
-        supplierId: selectedInvoice ? selectedInvoice.SupplierId : undefined,
-        purchaseInvoiceId: Number(invoiceId),
-        items: validLines.map((l) => ({
-          itemId: l.itemId,
-          quantity: Number(l.returnQty),
-          rate: Number(l.rate) || 0,
-          amount: (Number(l.returnQty) || 0) * (Number(l.rate) || 0),
-          batch: l.batch,
-          expiryDate: l.expiryDate,
-        })),
-      };
       if (editingId) {
         await purchaseReturnApi.update(editingId, payload);
-        show('Updated', 'success');
-        resetForm();
-        // Editing is initiated from the List page — return there to see the result.
-        navigate('/pharmacy/purchase-return-list');
+        show('Return updated successfully', 'success');
+        backToList();
       } else {
         await purchaseReturnApi.create(payload);
-        show('Saved', 'success');
-        // A fresh entry stays on this page, ready for the next return.
-        resetForm();
+        show('Return saved successfully', 'success');
+        setForm(emptyForm());
       }
     } catch (err) {
       show(err.response?.data?.error || 'Save failed', 'error');
@@ -166,86 +190,108 @@ export default function PurchaseReturn() {
           <CardHeader
             icon={Undo2}
             title={editingId ? 'Edit Purchase Return' : 'Purchase Return'}
-            subtitle={editingId ? 'Update this saved return' : 'Return stock against a purchase invoice'}
+            subtitle={editingId ? 'Update this saved return' : 'Return an item to its vendor'}
+            actions={
+              <button type="button" className="btn-secondary" onClick={backToList}>
+                <List size={16} /> View List
+              </button>
+            }
           />
-
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="lg:col-span-2">
-              <label className="label">Return Against Invoice *</label>
-              <SearchSelect options={invoiceOptions} value={invoiceId} onChange={pickInvoice} placeholder="Select invoice" searchPlaceholder="Search invoice..." />
+            <div>
+              <label className="label">Purchase Code</label>
+              <MasterPicker
+                value={form.purchaseInvoiceId} onChange={pickInvoice} options={invoices}
+                placeholder="Select purchase code" emptyMessage="No purchase invoices yet — add them in Purchase › Invoice."
+              />
             </div>
             <div>
-              <label className="label">Supplier</label>
-              <input className="input bg-ink-50" value={selectedInvoice?.SupplierName || '-'} disabled />
+              <label className="label">Bill Date</label>
+              <input type="date" className="input" value={form.billDate} onChange={(e) => set('billDate', e.target.value)} />
             </div>
             <div>
               <label className="label">Return Date</label>
-              <input type="date" className="input" value={transDate} onChange={(e) => setTransDate(e.target.value)} />
+              <input type="date" className="input" value={form.returnDate} onChange={(e) => set('returnDate', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Item Name *</label>
+              <MasterPicker
+                value={form.itemId} onChange={pickItem} options={items}
+                placeholder="Select item" emptyMessage="No items yet — add them in Item."
+              />
+            </div>
+            <div>
+              <label className="label">HSN</label>
+              <input className="input" placeholder="e.g. 3004" value={form.hsnCode} onChange={(e) => set('hsnCode', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Manufacturer</label>
+              <MasterPicker
+                value={form.manufacturerId} onChange={(id) => set('manufacturerId', id)} options={manufacturers}
+                onCreated={(row) => setManufacturers((c) => [...c, row].sort((a, b) => a.name.localeCompare(b.name)))}
+                createFn={(name) => manufacturerApi.create({ name }).then((r) => ({ id: r.ManufacturerId, name: r.Name }))}
+                placeholder="Select manufacturer" emptyMessage="No manufacturers yet — type a name to add one" addLabel="as new manufacturer"
+              />
+            </div>
+            <div>
+              <label className="label">Vendor *</label>
+              <MasterPicker
+                value={form.vendorId} onChange={(id) => set('vendorId', id)} options={vendors}
+                placeholder="Select vendor" emptyMessage="No vendors yet — add them in Vendor Master."
+              />
+            </div>
+            <div>
+              <label className="label">Qty *</label>
+              <input {...num('quantity', '0')} />
+            </div>
+            <div>
+              <label className="label">Unit</label>
+              <MasterPicker
+                value={form.unitId} onChange={(id) => set('unitId', id)} options={units}
+                onCreated={(row) => setUnits((c) => [...c, row].sort((a, b) => a.name.localeCompare(b.name)))}
+                createFn={(name) => unitApi.create({ name }).then((r) => ({ id: r.UnitId, name: r.Name }))}
+                placeholder="Select unit" emptyMessage="No units yet." addLabel="unit"
+              />
+            </div>
+            <div>
+              <label className="label">Batch</label>
+              <input className="input" placeholder="e.g. B1234" value={form.batch} onChange={(e) => set('batch', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Exp Date (Mon/Yr)</label>
+              <input type="month" className="input" value={form.expiryMonth} onChange={(e) => set('expiryMonth', e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Old Price</label>
+              <input {...num('oldPrice')} />
+            </div>
+            <div>
+              <label className="label">Current Price</label>
+              <input {...num('currentPrice')} />
+            </div>
+            <div>
+              <label className="label">GST %</label>
+              <input {...num('gstPercent')} />
+            </div>
+            <div>
+              <label className="label">Discount %</label>
+              <input {...num('discountPercent')} />
+            </div>
+            <div>
+              <label className="label">Net Price</label>
+              <input
+                className="input bg-ink-50 font-semibold" readOnly value={netPrice} placeholder="0.00"
+                title="Qty × Current Price, less Discount %, plus GST %"
+              />
             </div>
           </div>
-
-          {loadingLines ? (
-            <div className="mt-4"><Spinner /></div>
-          ) : !invoiceId ? (
-            <div className="mt-4"><EmptyState message="Select an invoice above to load its items." /></div>
-          ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="table-head">
-                    <th className="rounded-l-lg px-3 py-1.5">Item</th>
-                    <th className="px-3 py-1.5">Batch</th>
-                    <th className="px-3 py-1.5">Expiry</th>
-                    <th className="px-3 py-1.5">Purchased</th>
-                    <th className="px-3 py-1.5 w-28">Return Qty</th>
-                    <th className="px-3 py-1.5 w-28">Rate</th>
-                    <th className="rounded-r-lg px-3 py-1.5 w-32">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l) => (
-                    <tr key={l.key} className="table-row">
-                      <td className="px-3 py-1.5 font-medium text-ink-700">{l.itemName}</td>
-                      <td className="px-3 py-1.5 text-ink-500">{l.batch || '-'}</td>
-                      <td className="px-3 py-1.5 text-ink-500">{formatExpiry(l.expiryDate)}</td>
-                      <td className="px-3 py-1.5 text-ink-500">{l.purchasedQty}</td>
-                      <td className="px-3 py-1.5">
-                        <input
-                          type="number" step="0.01" min="0" max={l.purchasedQty}
-                          className="input" value={l.returnQty}
-                          onChange={(e) => setLine(l.key, { returnQty: e.target.value })}
-                        />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input
-                          type="number" step="0.01" min="0"
-                          className="input" value={l.rate}
-                          onChange={(e) => setLine(l.key, { rate: e.target.value })}
-                        />
-                      </td>
-                      <td className="px-3 py-1.5 font-medium text-ink-700">
-                        {((Number(l.returnQty) || 0) * (Number(l.rate) || 0)).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="mt-3 flex items-center justify-end">
-            <p className="text-sm font-semibold text-ink-700">Total: {total.toFixed(2)}</p>
-          </div>
-
-          <div className="mt-4 flex items-center gap-2">
-            <button type="submit" className="btn-primary" disabled={saving || !invoiceId}>
-              <Save size={16} /> {saving ? (editingId ? 'Updating...' : 'Saving...') : editingId ? 'Update' : 'Save'}
+          <div className="mt-4 flex justify-center gap-2">
+            <button type="button" className="btn-secondary" onClick={cancel}>
+              <X size={16} /> Cancel
             </button>
-            {editingId && (
-              <button type="button" className="btn-secondary" onClick={() => navigate('/pharmacy/purchase-return-list')}>
-                <X size={16} /> Cancel
-              </button>
-            )}
+            <button type="submit" className="btn-primary" disabled={saving}>
+              <Save size={16} /> {saving ? 'Saving...' : editingId ? 'Update' : 'Save'}
+            </button>
           </div>
         </form>
       </div>

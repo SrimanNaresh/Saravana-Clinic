@@ -7,7 +7,7 @@ import { getPool, sql } from '../db/pool.js';
 // (purchases) or a free-text customer name (sales, walk-in).
 //
 //   party: { type: 'supplier' } | { type: 'customer' }
-//   extraLineFields: optional [{ name, column, kind: 'text'|'decimal'|'date' }]
+//   extraLineFields: optional [{ name, column, kind: 'text'|'decimal'|'date'|'int' }]
 //                     — per-line columns beyond the base Item/Quantity/Rate/
 //                     Amount, read from body.items[i][name] and written to
 //                     itemTable.column. Purchase Invoice's richer grid
@@ -18,6 +18,9 @@ import { getPool, sql } from '../db/pool.js';
 //                     and written to headerTable.column, also returned by GET /.
 //                     Purchase Return's PurchaseInvoiceId (which invoice it was
 //                     raised against) uses this; the other types pass none.
+//   partyOptional: optional — when true, a supplier-party header may be saved
+//                     without a SupplierId (Purchase Return, which records a
+//                     Vendor instead and only has a supplier via its invoice).
 //
 // GET    /              list headers, newest first, optional ?search=
 // GET    /:id/items      line items for one header, joined to item name
@@ -25,7 +28,7 @@ import { getPool, sql } from '../db/pool.js';
 // DELETE /:id            soft-delete the header (items cascade-delete for real,
 //                         since they're meaningless without it — the header
 //                         itself is the record that matters to keep/undo)
-export function createTransactionRouter({ headerTable, itemTable, headerIdCol, codePrefix, party, extraLineFields = [], extraHeaderFields = [] }) {
+export function createTransactionRouter({ headerTable, itemTable, headerIdCol, codePrefix, party, extraLineFields = [], extraHeaderFields = [], partyOptional = false }) {
   const router = Router();
   const codeExpr = (alias) => `'${codePrefix}' + RIGHT('000000' + CAST(${alias}.${headerIdCol} AS VARCHAR(10)), 6)`;
   const isSupplier = party.type === 'supplier';
@@ -96,6 +99,7 @@ export function createTransactionRouter({ headerTable, itemTable, headerIdCol, c
     for (const f of extraLineFields) {
       const raw = it[f.name];
       if (f.kind === 'decimal') lineReq.input(f.name, sql.Decimal(12, 2), raw === '' || raw == null ? null : Number(raw));
+      else if (f.kind === 'int') lineReq.input(f.name, sql.Int, raw === '' || raw == null ? null : Number(raw));
       else if (f.kind === 'date') lineReq.input(f.name, sql.Date, raw ? new Date(raw) : null);
       else lineReq.input(f.name, sql.NVarChar, raw?.toString().trim() || null);
       extraCols.push(f.column);
@@ -129,7 +133,7 @@ export function createTransactionRouter({ headerTable, itemTable, headerIdCol, c
     const { transDate, supplierId, customerName, items } = req.body;
     const lines = (Array.isArray(items) ? items : []).filter((it) => it.itemId && Number(it.quantity) > 0);
     if (lines.length === 0) return res.status(400).json({ error: 'At least one line item with an item and quantity is required' });
-    if (isSupplier && !supplierId) return res.status(400).json({ error: 'Supplier is required' });
+    if (isSupplier && !supplierId && !partyOptional) return res.status(400).json({ error: 'Supplier is required' });
 
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
@@ -140,7 +144,7 @@ export function createTransactionRouter({ headerTable, itemTable, headerIdCol, c
       const headerReq = new sql.Request(tx)
         .input('transDate', sql.Date, transDate ? new Date(transDate) : new Date())
         .input('total', sql.Decimal(12, 2), total);
-      if (isSupplier) headerReq.input('party', sql.Int, supplierId);
+      if (isSupplier) headerReq.input('party', sql.Int, supplierId || null);
       else headerReq.input('party', sql.NVarChar, customerName?.trim() || null);
       const { cols: extraCols, placeholders: extraVals } = bindExtraHeaderFields(headerReq, req.body);
 
@@ -169,7 +173,7 @@ export function createTransactionRouter({ headerTable, itemTable, headerIdCol, c
     const { transDate, supplierId, customerName, items } = req.body;
     const lines = (Array.isArray(items) ? items : []).filter((it) => it.itemId && Number(it.quantity) > 0);
     if (lines.length === 0) return res.status(400).json({ error: 'At least one line item with an item and quantity is required' });
-    if (isSupplier && !supplierId) return res.status(400).json({ error: 'Supplier is required' });
+    if (isSupplier && !supplierId && !partyOptional) return res.status(400).json({ error: 'Supplier is required' });
 
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
@@ -181,7 +185,7 @@ export function createTransactionRouter({ headerTable, itemTable, headerIdCol, c
         .input('id', sql.Int, req.params.id)
         .input('transDate', sql.Date, transDate ? new Date(transDate) : new Date())
         .input('total', sql.Decimal(12, 2), total);
-      if (isSupplier) headerReq.input('party', sql.Int, supplierId);
+      if (isSupplier) headerReq.input('party', sql.Int, supplierId || null);
       else headerReq.input('party', sql.NVarChar, customerName?.trim() || null);
       const { cols: extraCols } = bindExtraHeaderFields(headerReq, req.body);
 

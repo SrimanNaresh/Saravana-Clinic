@@ -3,7 +3,8 @@ import { getPool, sql } from '../db/pool.js';
 
 const router = Router();
 
-// Item-wise stock = Purchased - Purchase Returned - Sold + Sales Returned.
+// Item-wise stock = Purchased - Purchase Returned - Sold + Sales Returned,
+// where Purchased is Purchase Invoice lines plus Stock Inward entries.
 // This list is a net quantity per item, not a batch-by-batch ledger — see
 // GET /:itemId/batches below for the batch-level (and now sales-aware)
 // breakdown. "Nearest Expiry" is the soonest upcoming expiry among that
@@ -16,11 +17,15 @@ router.get('/', async (req, res) => {
       .request()
       .input('search', sql.NVarChar, `%${search}%`)
       .query(`
-        WITH Purchased AS (
-          SELECT pii.ItemId, SUM(pii.Quantity) AS Qty
+        WITH Received AS (
+          SELECT pii.ItemId, pii.Quantity, pii.ExpiryDate
           FROM PurchaseInvoiceItem pii
           JOIN PurchaseInvoice pi ON pi.PurchaseInvoiceId = pii.PurchaseInvoiceId AND pi.IsActive = 1
-          GROUP BY pii.ItemId
+          UNION ALL
+          SELECT si.ItemId, si.Quantity, si.ExpiryDate FROM StockInward si WHERE si.IsActive = 1
+        ),
+        Purchased AS (
+          SELECT ItemId, SUM(Quantity) AS Qty FROM Received GROUP BY ItemId
         ),
         PurchaseReturned AS (
           SELECT pri.ItemId, SUM(pri.Quantity) AS Qty
@@ -41,11 +46,10 @@ router.get('/', async (req, res) => {
           GROUP BY sri.ItemId
         ),
         NearestExpiry AS (
-          SELECT pii.ItemId, MIN(pii.ExpiryDate) AS NearestExpiry
-          FROM PurchaseInvoiceItem pii
-          JOIN PurchaseInvoice pi ON pi.PurchaseInvoiceId = pii.PurchaseInvoiceId AND pi.IsActive = 1
-          WHERE pii.ExpiryDate IS NOT NULL AND pii.ExpiryDate >= CAST(GETDATE() AS DATE)
-          GROUP BY pii.ItemId
+          SELECT ItemId, MIN(ExpiryDate) AS NearestExpiry
+          FROM Received
+          WHERE ExpiryDate IS NOT NULL AND ExpiryDate >= CAST(GETDATE() AS DATE)
+          GROUP BY ItemId
         )
         SELECT
           i.ItemId, i.Name AS ItemName, it.Name AS ItemTypeName,
@@ -71,7 +75,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Batch-level detail for one item: every batch purchased, its expiry, how
+// Batch-level detail for one item: every batch purchased (Purchase Invoice
+// lines and Stock Inward entries), its expiry, how
 // much of that same batch has been purchase-returned or sold (Sales Billing
 // records which batch it fulfilled from), and what's left available to sell.
 router.get('/:itemId/batches', async (req, res) => {
@@ -81,6 +86,16 @@ router.get('/:itemId/batches', async (req, res) => {
       .request()
       .input('itemId', sql.Int, req.params.itemId)
       .query(`
+        WITH Received AS (
+          SELECT pii.ItemId, pii.Batch, pii.ExpiryDate, pii.Quantity
+          FROM PurchaseInvoiceItem pii
+          JOIN PurchaseInvoice pi ON pi.PurchaseInvoiceId = pii.PurchaseInvoiceId AND pi.IsActive = 1
+          WHERE pii.ItemId = @itemId
+          UNION ALL
+          SELECT si.ItemId, si.Batch, si.ExpiryDate, si.Quantity
+          FROM StockInward si
+          WHERE si.ItemId = @itemId AND si.IsActive = 1
+        )
         SELECT
           pii.Batch, pii.ExpiryDate,
           SUM(pii.Quantity) AS PurchasedQty,
@@ -96,9 +111,7 @@ router.get('/:itemId/batches', async (req, res) => {
             JOIN SalesBilling sb ON sb.SalesBillingId = sbi.SalesBillingId AND sb.IsActive = 1
             WHERE sbi.ItemId = pii.ItemId AND ISNULL(sbi.Batch, '') = ISNULL(pii.Batch, '')
           ), 0) AS SoldQty
-        FROM PurchaseInvoiceItem pii
-        JOIN PurchaseInvoice pi ON pi.PurchaseInvoiceId = pii.PurchaseInvoiceId AND pi.IsActive = 1
-        WHERE pii.ItemId = @itemId
+        FROM Received pii
         GROUP BY pii.Batch, pii.ExpiryDate, pii.ItemId
         ORDER BY pii.ExpiryDate ASC
       `);

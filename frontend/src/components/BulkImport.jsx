@@ -25,11 +25,15 @@ import { Download, Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-r
  *               aren't our template (e.g. an exported report with title rows
  *               above the headers), the first of the top 20 rows it accepts is
  *               used as the header row. Defaults to row 1 when none match.
+ *  - textColumns: optional column names whose template cells are formatted as
+ *               Text, so Excel keeps typed dates like 14/05/2026 or 05/2027
+ *               as written instead of converting them (only when `dropdowns`
+ *               is given, as that's the ExcelJS path).
  *  - quietSuccess: optional — in inline mode, skip the floating notice for a
  *               fully successful import (the page shows its own message);
  *               errors and failed rows still show.
  */
-export default function BulkImport({ columns, sample = [], fileName = 'template', onImport, onDone, note, variant = 'panel', dropdowns, isHeaderRow, quietSuccess }) {
+export default function BulkImport({ columns, sample = [], fileName = 'template', onImport, onDone, note, variant = 'panel', dropdowns, isHeaderRow, quietSuccess, textColumns = [] }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -49,6 +53,14 @@ export default function BulkImport({ columns, sample = [], fileName = 'template'
       sheet.addRow(columns);
       sheet.getRow(1).font = { bold: true };
       sample.forEach((r) => sheet.addRow(r));
+
+      textColumns.forEach((colName) => {
+        const colIndex = columns.indexOf(colName);
+        if (colIndex === -1) return;
+        for (let row = 2; row <= DATA_ROWS; row++) sheet.getCell(row, colIndex + 1).numFmt = '@';
+        const col = sheet.getColumn(colIndex + 1);
+        col.width = Math.max(col.width || 10, colName.length + 2);
+      });
 
       const listsSheet = workbook.addWorksheet('Lists');
       listsSheet.state = 'veryHidden';

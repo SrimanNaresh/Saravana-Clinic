@@ -60,7 +60,13 @@ export const MENU_GROUPS = [
           { key: 'pharmacy.sales-return', label: 'Return', to: '/pharmacy/sales-return' },
         ],
       },
-      { key: 'pharmacy.stock', label: 'Stock', to: '/pharmacy/stock' },
+      {
+        label: 'Stock',
+        submenu: [
+          { key: 'pharmacy.stock', label: 'Stock', to: '/pharmacy/stock' },
+          { key: 'pharmacy.stock-inward', label: 'Inward', to: '/pharmacy/stock-inward' },
+        ],
+      },
     ],
   },
   {
