@@ -9,24 +9,22 @@ import CellCombo from './CellCombo.jsx';
 
 const PAGE_SIZE = 30;
 
-// List columns after Item Name, in display order. An empty cell is a text box
-// to type into (saved with Enter or Save All); filled cells show as text.
-// `field` is the key the PATCH route takes, `rowKey` where the list row
-// carries the value, `list` the master whose names are suggested, `width`
-// the box's width.
+// List columns after Item Name, in display order. Every cell is a text box
+// showing the saved value (blank when there's none), to type into and save
+// with Enter or Save All. `field` is the key the PATCH route takes, `rowKey`
+// where the list row carries the value, `list` the master whose names are
+// suggested, `width` the box's width.
 const FILL_COLUMNS = [
   { field: 'GenericName', rowKey: 'GenericNameName', list: 'genericNames', width: 'w-32' },
   { field: 'Manufacturer', rowKey: 'ManufacturerName', list: 'manufacturers', width: 'w-32' },
   { field: 'HSNCode', rowKey: 'HSNCode', suggest: 'as new HSN code', width: 'w-20' },
-  { field: 'MRP', rowKey: 'MRP', numeric: true, alwaysEdit: true, width: 'w-20' },
-  { field: 'Unit', rowKey: 'UnitName', list: 'units', alwaysEdit: true, width: 'w-20' },
+  { field: 'MRP', rowKey: 'MRP', numeric: true, width: 'w-20' },
+  { field: 'Unit', rowKey: 'UnitName', list: 'units', width: 'w-20' },
   { field: 'GSTPercent', rowKey: 'GSTPercent', numeric: true, suggest: 'as new GST %', width: 'w-16' },
-  { field: 'SellPrice', rowKey: 'SellPrice', numeric: true, alwaysEdit: true, width: 'w-20' },
+  { field: 'SellPrice', rowKey: 'SellPrice', numeric: true, width: 'w-20' },
   { field: 'Rack', rowKey: 'Rack', suggest: 'as new rack', width: 'w-16' },
   { field: 'BoxNo', rowKey: 'BoxNo', suggest: 'as new box no', width: 'w-16' },
 ];
-// MRP / Unit / Sell Price (`alwaysEdit` set) stay a box even when filled,
-// showing the current value to change.
 // HSN / GST / Rack / Box No (`suggest` set) have no master table: their dropdowns
 // list the values already used on items, and "Add" just keeps the typed
 // value (offered to the other rows too until the list reloads).
@@ -330,7 +328,7 @@ export default function ItemListNew() {
                       <td className="px-3 py-1 font-medium text-slate-700">{r.Name}</td>
                       {FILL_COLUMNS.map((c) => (
                         <td key={c.field} className="px-2 py-1 text-slate-500">
-                          {!isBlank(r[c.rowKey]) && !c.alwaysEdit ? r[c.rowKey] : c.list ? (
+                          {c.list ? (
                             <CellCombo
                               className={`input h-6 rounded-md px-1.5 py-0 text-[11px] ${c.width}`}
                               value={typed?.[c.field] ?? cellText(r[c.rowKey])}
