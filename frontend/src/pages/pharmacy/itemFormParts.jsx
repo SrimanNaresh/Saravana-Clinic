@@ -6,8 +6,9 @@ import { supplierApi, genericNameApi, manufacturerApi, itemTypeApi, unitApi } fr
 // `createFn`) right from here — type a name that doesn't match anything and
 // an "Add" option appears. Without `createFn` it's pick-only. Used for Supplier, Generic Name, Manufacturer,
 // Item Type and Unit, each backed by its own small master table (same
-// pattern as each other).
-export function MasterPicker({ value, onChange, options, onCreated, createFn, placeholder, emptyMessage, addLabel }) {
+// pattern as each other). With `multiple`, `value` is an array of ids and
+// picking toggles a name, leaving the dropdown open for the next one.
+export function MasterPicker({ value, onChange, options, onCreated, createFn, placeholder, emptyMessage, addLabel, multiple }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
@@ -19,12 +20,17 @@ export function MasterPicker({ value, onChange, options, onCreated, createFn, pl
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const selected = options.find((o) => String(o.id) === String(value));
+  const isPicked = (id) => (multiple ? value.some((v) => String(v) === String(id)) : String(id) === String(value));
+  const picked = options.filter((o) => isPicked(o.id));
+  const label = picked.length > 2 ? `${picked.length} selected` : picked.map((o) => o.name).join(', ');
   const q = query.trim().toLowerCase();
   const filtered = q ? options.filter((o) => o.name.toLowerCase().includes(q)) : options;
   const exactMatch = options.some((o) => o.name.toLowerCase() === q);
 
-  const pick = (id) => { onChange(id); setOpen(false); setQuery(''); };
+  const pick = (id) => {
+    if (!multiple) { onChange(id); setOpen(false); setQuery(''); return; }
+    onChange(isPicked(id) ? value.filter((v) => String(v) !== String(id)) : [...value, id]);
+  };
 
   const createAndPick = async () => {
     const name = query.trim();
@@ -44,8 +50,8 @@ export function MasterPicker({ value, onChange, options, onCreated, createFn, pl
   return (
     <div className="relative" ref={ref}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between gap-2 text-left">
-        <span className={selected ? 'truncate text-ink-800' : 'truncate text-ink-400'}>
-          {selected ? selected.name : placeholder}
+        <span className={label ? 'truncate text-ink-800' : 'truncate text-ink-400'}>
+          {label || placeholder}
         </span>
         <ChevronDown size={16} className={`shrink-0 text-ink-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -84,11 +90,11 @@ export function MasterPicker({ value, onChange, options, onCreated, createFn, pl
                   type="button"
                   onClick={() => pick(o.id)}
                   className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors ${
-                    String(o.id) === String(value) ? 'bg-brand-50 font-medium text-brand-700' : 'text-ink-600 hover:bg-ink-50'
+                    isPicked(o.id) ? 'bg-brand-50 font-medium text-brand-700' : 'text-ink-600 hover:bg-ink-50'
                   }`}
                 >
                   <span className="truncate">{o.name}</span>
-                  {String(o.id) === String(value) && <Check size={15} className="shrink-0 text-brand-600" />}
+                  {isPicked(o.id) && <Check size={15} className="shrink-0 text-brand-600" />}
                 </button>
               ))
             )}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ClipboardList, Save, Trash2, X } from 'lucide-react';
+import { ClipboardList, List, Save, Trash2, X } from 'lucide-react';
 import { CardHeader, Toast } from '../../components/ui.jsx';
 import BulkImport from '../../components/BulkImport.jsx';
 import { useToast } from '../../hooks/useToast.js';
@@ -8,8 +8,11 @@ import { pharmacyItemApi, vendorApi, unitApi, manufacturerApi, purchaseMasterApi
 import { MasterPicker } from './itemFormParts.jsx';
 import CellCombo from './CellCombo.jsx';
 
-const emptyForm = {
-  itemId: '', hsnCode: '', manufacturerId: '', vendorId: '', quantity: '', unitName: '',
+// One vendor and a line per item picked: adding saves a purchase entry per
+// line; editing an entry has exactly one line.
+const emptyForm = { vendorId: '', lines: [] };
+const emptyLine = {
+  itemId: '', manufacturerName: '', quantity: '', unitName: '',
   oldPrice: '', currentPrice: '', gstPercent: '', discountPercent: '', netPrice: '',
 };
 
@@ -17,10 +20,13 @@ const emptyForm = {
 const str = (v) => (v === null || v === undefined ? '' : String(v));
 
 const rowToForm = (r) => ({
-  itemId: r.ItemId ?? '', hsnCode: str(r.HSNCode), manufacturerId: r.ManufacturerId ?? '',
-  vendorId: r.VendorId ?? '', quantity: str(r.Quantity), unitName: str(r.UnitName),
-  oldPrice: str(r.OldPrice), currentPrice: str(r.CurrentPrice),
-  gstPercent: str(r.GSTPercent), discountPercent: str(r.DiscountPercent), netPrice: str(r.NetPrice),
+  vendorId: r.VendorId ?? '',
+  lines: [{
+    itemId: r.ItemId ?? '', manufacturerName: str(r.ManufacturerName),
+    quantity: str(r.Quantity), unitName: str(r.UnitName),
+    oldPrice: str(r.OldPrice), currentPrice: str(r.CurrentPrice),
+    gstPercent: str(r.GSTPercent), discountPercent: str(r.DiscountPercent), netPrice: str(r.NetPrice),
+  }],
 });
 
 // Net Price = Qty x Current Price, less Discount %, plus GST % on the
@@ -36,12 +42,11 @@ function netPriceOf({ quantity, currentPrice, gstPercent, discountPercent }) {
 const NET_INPUTS = ['quantity', 'currentPrice', 'gstPercent', 'discountPercent'];
 const withNet = (f) => ({ ...f, netPrice: netPriceOf(f) });
 
-// The value boxes, like ItemList new's HSN / GST cells: each one's dropdown
+// Each line's value boxes, like ItemList new's GST cells: each one's dropdown
 // lists the values already used on purchase entries, "Add" keeps a typed
 // value, and Edit / Delete rename or clear a value on every entry that has
 // it. `field` is the PurchaseMaster column (and list row key).
 const VALUE_BOXES = {
-  hsnCode: { field: 'HSNCode', label: 'HSN', placeholder: 'e.g. 3004', noun: 'HSN code' },
   quantity: { field: 'Quantity', label: 'Qty *', placeholder: '0', noun: 'qty', numeric: true },
   oldPrice: { field: 'OldPrice', label: 'Old Price', noun: 'old price', numeric: true },
   currentPrice: { field: 'CurrentPrice', label: 'Current Price', noun: 'current price', numeric: true },
@@ -60,7 +65,7 @@ const TEMPLATE_COLUMNS = [
 const TEMPLATE_SAMPLE = [
   ['Paracetamol 500mg', '3004', 'GSK', 'MedPlus Distributors', '10', 'Strip', '10.00', '10.50', '12', '5', '111.72'],
 ];
-const TEMPLATE_NOTE = 'Each row is a new purchase entry. Item Name, Vendor and Qty are required; an item or vendor not on file yet is added. Blank HSN, Manufacturer, Unit, GST, Discount and Old Price are filled from the item. Net Price is worked out from Qty, Current Price, Discount and GST.';
+const TEMPLATE_NOTE = 'Each row is a new purchase entry. Item Name, Vendor and Qty are required; an item or vendor not on file yet is added. HSN is always taken from Item Master; the HSN column is only used for an item added by the import. Blank Manufacturer, Unit, GST, Discount and Old Price are filled from the item. Net Price is worked out from Qty, Current Price, Discount and GST.';
 const keyOf = (h) => String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
 // Normalised header -> the field the bulk route takes.
 const HEADER_MAP = {
@@ -88,7 +93,7 @@ export default function PurchaseMaster() {
   const navigate = useNavigate();
   const { toast, show } = useToast();
   const [form, setForm] = useState(emptyForm);
-  // Set when Purchase Master List's Edit opened a record here; null while adding a new one.
+  // Set when Purchase Master List's Edit opened a record here; null while adding new ones.
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [items, setItems] = useState([]);
@@ -108,7 +113,7 @@ export default function PurchaseMaster() {
     .catch(() => show('Failed to load units', 'error')), [show]);
   const loadPurchases = useCallback(() => purchaseMasterApi.list().then(setPurchases).catch(() => {}), []);
   const loadItems = useCallback(() => pharmacyItemApi.list().then((rows) => setItems(rows.map((r) => ({
-    id: r.ItemId, name: r.Name, unitName: r.UnitName, hsnCode: r.HSNCode, manufacturerId: r.ManufacturerId,
+    id: r.ItemId, name: r.Name, unitName: r.UnitName, manufacturerName: r.ManufacturerName,
     gstPercent: r.GSTPercent, discountPercent: r.DiscountPercent, purchaseRate: r.PurchaseRate,
   })))).catch(() => show('Failed to load items', 'error')), [show]);
   const loadVendors = useCallback(() => vendorApi.list()
@@ -147,28 +152,44 @@ export default function PurchaseMaster() {
     return [key, names.map((n) => ({ id: n, name: n }))];
   })), [purchases, addedValues]);
 
-  const set = (key, value) => setForm((c) => {
-    const next = { ...c, [key]: value };
-    return NET_INPUTS.includes(key) ? withNet(next) : next;
-  });
+  const itemOf = (id) => items.find((i) => String(i.id) === String(id));
 
-  // Picking an item fills in what Item Master knows about it (HSN,
-  // manufacturer, unit, GST, discount) and its Old Price: the price it was
+  const setLine = (index, key, value) => setForm((c) => ({
+    ...c,
+    lines: c.lines.map((line, i) => {
+      if (i !== index) return line;
+      const next = { ...line, [key]: value };
+      return NET_INPUTS.includes(key) ? withNet(next) : next;
+    }),
+  }));
+
+  // A picked item's line is filled in from what Item Master knows about it
+  // (manufacturer, unit, GST, discount) and its Old Price: the price it was
   // last purchased at, else its purchase rate. Everything stays editable.
-  const pickItem = (id) => {
-    const item = items.find((i) => String(i.id) === String(id));
-    if (!item) return set('itemId', id);
-    setForm((c) => withNet({
-      ...c,
+  // HSN isn't on the form: the backend always takes it from Item Master.
+  const lineFor = (id, line = emptyLine) => {
+    const item = itemOf(id);
+    if (!item) return { ...line, itemId: id };
+    return withNet({
+      ...line,
       itemId: id,
-      hsnCode: str(item.hsnCode) || c.hsnCode,
-      manufacturerId: item.manufacturerId ?? c.manufacturerId,
-      unitName: str(item.unitName) || c.unitName,
+      manufacturerName: str(item.manufacturerName) || line.manufacturerName,
+      unitName: str(item.unitName) || line.unitName,
       gstPercent: str(item.gstPercent),
       discountPercent: str(item.discountPercent),
       oldPrice: str(lastPrices[id] ?? item.purchaseRate),
-    }));
+    });
   };
+
+  // Adding: the picker holds several items, one line each (a line already
+  // there keeps what was typed into it).
+  const pickItems = (ids) => setForm((c) => ({
+    ...c,
+    lines: ids.map((id) => c.lines.find((l) => String(l.itemId) === String(id)) || lineFor(id)),
+  }));
+  // Editing: one item, swapped in place.
+  const pickItem = (id) => setForm((c) => ({ ...c, lines: [lineFor(id, c.lines[0])] }));
+  const removeLine = (index) => setForm((c) => ({ ...c, lines: c.lines.filter((_, i) => i !== index) }));
 
   // Value box Edit / Delete: rename or clear the value on every saved entry.
   const valueHandlers = (key) => {
@@ -218,15 +239,22 @@ export default function PurchaseMaster() {
     },
   };
 
-  const valueBox = (key) => (
-    <div>
-      <label className="label">{VALUE_BOXES[key].label}</label>
+  // Manufacturer box: names from Manufacturer master; a new name is added to it.
+  const manufacturerHandlers = {
+    createFn: (name) => manufacturerApi.create({ name }).then((r) => ({ id: r.ManufacturerId, name: r.Name })),
+    onCreated: (row) => setManufacturers((c) => [...c, row].sort((a, b) => a.name.localeCompare(b.name))),
+    addLabel: 'as new manufacturer',
+  };
+
+  const cellClass = 'input py-1.5 text-sm';
+  const valueCell = (index, key) => (
+    <td className="px-1 py-1.5">
       <CellCombo
-        className="input" placeholder={VALUE_BOXES[key].placeholder ?? '0.00'}
-        value={form[key]} onChange={(v) => set(key, v)} options={suggestions[key]}
+        className={`${cellClass} w-24`} placeholder={VALUE_BOXES[key].placeholder ?? '0.00'}
+        value={form.lines[index][key]} onChange={(v) => setLine(index, key, v)} options={suggestions[key]}
         {...valueHandlers(key)}
       />
-    </div>
+    </td>
   );
 
   const backToList = () => navigate('/pharmacy/purchase-master-list');
@@ -236,35 +264,49 @@ export default function PurchaseMaster() {
     setForm(emptyForm);
   };
 
-  // The unit typed into the Unit box, as an id — added to Unit master when new.
-  const resolveUnitId = async () => {
-    const name = form.unitName.trim();
-    if (!name) return null;
-    const match = units.find((u) => u.name.toLowerCase() === name.toLowerCase());
-    if (match) return match.id;
-    const created = await unitHandlers.createFn(name);
-    unitHandlers.onCreated(created);
-    return created.id;
+  // Turns a typed master name into its id, adding it to the master when new.
+  // Names already resolved in this save are reused, so a new name typed on
+  // several lines is only added once.
+  const resolver = (list, handlers) => {
+    const ids = new Map(list.map((o) => [o.name.toLowerCase(), o.id]));
+    return async (typed) => {
+      const name = typed.trim();
+      if (!name) return null;
+      if (!ids.has(name.toLowerCase())) {
+        const created = await handlers.createFn(name);
+        handlers.onCreated(created);
+        ids.set(name.toLowerCase(), created.id);
+      }
+      return ids.get(name.toLowerCase());
+    };
   };
 
   const save = async (e) => {
     e.preventDefault();
-    if (!form.itemId) return show('Select an item', 'error');
     if (!form.vendorId) return show('Select a vendor', 'error');
-    if (!(Number(form.quantity) > 0)) return show('Qty must be a number greater than 0', 'error');
-    const notNumber = Object.entries(VALUE_BOXES)
-      .find(([key, b]) => b.numeric && form[key].trim() !== '' && Number.isNaN(Number(form[key])));
-    if (notNumber) return show(`${notNumber[1].label.replace(' *', '')} must be a number`, 'error');
+    if (form.lines.length === 0) return show('Select an item', 'error');
+    for (const line of form.lines) {
+      // Several lines: say which item a problem is on.
+      const on = form.lines.length > 1 ? `${itemOf(line.itemId)?.name ?? 'Item'}: ` : '';
+      if (!(Number(line.quantity) > 0)) return show(`${on}Qty must be a number greater than 0`, 'error');
+      const notNumber = Object.entries(VALUE_BOXES)
+        .find(([key, b]) => b.numeric && line[key].trim() !== '' && Number.isNaN(Number(line[key])));
+      if (notNumber) return show(`${on}${notNumber[1].label.replace(' *', '')} must be a number`, 'error');
+    }
     setSaving(true);
     try {
-      const { unitName, ...rest } = form;
-      const body = { ...rest, unitId: await resolveUnitId() };
+      const unitId = resolver(units, unitHandlers);
+      const manufacturerId = resolver(manufacturers, manufacturerHandlers);
+      const bodies = [];
+      for (const { unitName, manufacturerName, ...rest } of form.lines) {
+        bodies.push({ ...rest, unitId: await unitId(unitName), manufacturerId: await manufacturerId(manufacturerName) });
+      }
       if (editingId) {
-        await purchaseMasterApi.update(editingId, body);
+        await purchaseMasterApi.update(editingId, { ...bodies[0], vendorId: form.vendorId });
         show('Purchase updated successfully', 'success');
       } else {
-        await purchaseMasterApi.create(body);
-        show('Purchase saved successfully', 'success');
+        const { inserted } = await purchaseMasterApi.createMany(form.vendorId, bodies);
+        show(inserted === 1 ? 'Purchase saved successfully' : `${inserted} purchases saved successfully`, 'success');
       }
       setForm(emptyForm);
       setEditingId(null);
@@ -297,71 +339,120 @@ export default function PurchaseMaster() {
           <CardHeader
             icon={ClipboardList}
             title={editingId ? 'Edit Purchase' : 'Purchase Master'}
-            subtitle={editingId ? 'Update or delete this purchase entry' : 'Record an item bought from a vendor'}
+            subtitle={editingId ? 'Update or delete this purchase entry' : 'Record items bought from a vendor'}
             actions={
-              <BulkImport
-                variant="inline"
-                fileName="purchase-master"
-                columns={TEMPLATE_COLUMNS}
-                sample={TEMPLATE_SAMPLE}
-                note={TEMPLATE_NOTE}
-                dropdowns={{
-                  Manufacturer: manufacturers.map((m) => m.name),
-                  Vendor: vendors.map((v) => v.name),
-                  Unit: units.map((u) => u.name),
-                }}
-                isHeaderRow={(cells) => cells.some((c) => HEADER_MAP[keyOf(c)] === 'ItemName')}
-                onImport={async (rows) => {
-                  const entries = rows.map(normalizeRow).filter((r) => r.ItemName);
-                  if (entries.length === 0) {
-                    return { error: 'No "Item Name" column found — check the sheet has an Item Name header.' };
-                  }
-                  return purchaseMasterApi.bulk(entries);
-                }}
-                onDone={loadAll}
-              />
+              <>
+                <BulkImport
+                  variant="inline"
+                  fileName="purchase-master"
+                  columns={TEMPLATE_COLUMNS}
+                  sample={TEMPLATE_SAMPLE}
+                  note={TEMPLATE_NOTE}
+                  dropdowns={{
+                    Manufacturer: manufacturers.map((m) => m.name),
+                    Vendor: vendors.map((v) => v.name),
+                    Unit: units.map((u) => u.name),
+                  }}
+                  isHeaderRow={(cells) => cells.some((c) => HEADER_MAP[keyOf(c)] === 'ItemName')}
+                  onImport={async (rows) => {
+                    const entries = rows.map(normalizeRow).filter((r) => r.ItemName);
+                    if (entries.length === 0) {
+                      return { error: 'No "Item Name" column found — check the sheet has an Item Name header.' };
+                    }
+                    return purchaseMasterApi.bulk(entries);
+                  }}
+                  onDone={loadAll}
+                />
+                <button type="button" className="btn-secondary" onClick={backToList}>
+                  <List size={16} /> View List
+                </button>
+              </>
             }
           />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Vendor *</label>
               <MasterPicker
-                value={form.vendorId} onChange={(id) => set('vendorId', id)} options={vendors}
+                value={form.vendorId} onChange={(id) => setForm((c) => ({ ...c, vendorId: id }))} options={vendors}
                 placeholder="Select vendor" emptyMessage="No vendors yet — add them in Vendor Master."
               />
             </div>
             <div>
-              <label className="label">Item Name *</label>
-              <MasterPicker
-                value={form.itemId} onChange={pickItem} options={items}
-                placeholder="Select item" emptyMessage="No items yet — add them in Item."
-              />
+              <label className="label">{editingId ? 'Item Name *' : 'Item Names *'}</label>
+              {editingId ? (
+                <MasterPicker
+                  value={form.lines[0]?.itemId ?? ''} onChange={pickItem} options={items}
+                  placeholder="Select item" emptyMessage="No items yet — add them in Item."
+                />
+              ) : (
+                <MasterPicker
+                  multiple value={form.lines.map((l) => l.itemId)} onChange={pickItems} options={items}
+                  placeholder="Select one or more items" emptyMessage="No items yet — add them in Item."
+                />
+              )}
             </div>
-            {valueBox('hsnCode')}
-            <div>
-              <label className="label">Manufacturer</label>
-              <MasterPicker
-                value={form.manufacturerId} onChange={(id) => set('manufacturerId', id)} options={manufacturers}
-                onCreated={(row) => setManufacturers((c) => [...c, row].sort((a, b) => a.name.localeCompare(b.name)))}
-                createFn={(name) => manufacturerApi.create({ name }).then((r) => ({ id: r.ManufacturerId, name: r.Name }))}
-                placeholder="Select manufacturer" emptyMessage="No manufacturers yet — type a name to add one" addLabel="as new manufacturer"
-              />
-            </div>
-            {valueBox('quantity')}
-            <div>
-              <label className="label">Unit</label>
-              <CellCombo
-                className="input" placeholder="Select unit"
-                value={form.unitName} onChange={(v) => set('unitName', v)} options={units}
-                {...unitHandlers}
-              />
-            </div>
-            {valueBox('oldPrice')}
-            {valueBox('currentPrice')}
-            {valueBox('gstPercent')}
-            {valueBox('discountPercent')}
-            {valueBox('netPrice')}
           </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-ink-50 text-xs font-semibold uppercase text-ink-500">
+                <tr>
+                  <th className="rounded-l-lg px-2 py-2">Item</th>
+                  <th className="px-1 py-2">Manufacturer</th>
+                  <th className="px-1 py-2">Qty *</th>
+                  <th className="px-1 py-2">Unit</th>
+                  <th className="px-1 py-2">Old Price</th>
+                  <th className="px-1 py-2">Current Price</th>
+                  <th className="px-1 py-2">GST %</th>
+                  <th className="px-1 py-2">Discount %</th>
+                  <th className="px-1 py-2">Net Price</th>
+                  <th className="rounded-r-lg px-1 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {form.lines.length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="px-2 py-6 text-center text-sm text-ink-400">
+                      Select items in Item Names — each item gets a row here for its Manufacturer, Qty, Unit and prices.
+                    </td>
+                  </tr>
+                )}
+                {form.lines.map((line, index) => (
+                  <tr key={line.itemId}>
+                    <td className="px-2 py-1.5 font-medium text-ink-800">{itemOf(line.itemId)?.name ?? '-'}</td>
+                    <td className="px-1 py-1.5">
+                      <CellCombo
+                        className={`${cellClass} w-40`} placeholder="Select manufacturer"
+                        value={line.manufacturerName} onChange={(v) => setLine(index, 'manufacturerName', v)}
+                        options={manufacturers} {...manufacturerHandlers}
+                      />
+                    </td>
+                    {valueCell(index, 'quantity')}
+                    <td className="px-1 py-1.5">
+                      <CellCombo
+                        className={`${cellClass} w-28`} placeholder="Select unit"
+                        value={line.unitName} onChange={(v) => setLine(index, 'unitName', v)} options={units}
+                        {...unitHandlers}
+                      />
+                    </td>
+                    {valueCell(index, 'oldPrice')}
+                    {valueCell(index, 'currentPrice')}
+                    {valueCell(index, 'gstPercent')}
+                    {valueCell(index, 'discountPercent')}
+                    {valueCell(index, 'netPrice')}
+                    <td className="px-1 py-1.5">
+                      {!editingId && (
+                        <button type="button" className="rounded p-1 text-ink-400 hover:bg-red-50 hover:text-red-600" onClick={() => removeLine(index)} title="Remove this item">
+                          <X size={16} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
           <div className="mt-4 flex justify-center gap-2">
             <button type="button" className="btn-secondary" onClick={cancel}>
               <X size={16} /> Cancel
@@ -380,3 +471,4 @@ export default function PurchaseMaster() {
     </div>
   );
 }
+

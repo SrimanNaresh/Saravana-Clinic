@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
-import { num, text, blank, importRowBody, addedNote } from './_purchaseRows.js';
+import { num, blank, importRowBody, addedNote } from './_purchaseRows.js';
 
 const router = Router();
 
@@ -16,6 +16,10 @@ const SELECT = `
   LEFT JOIN ManufacturerMaster m ON m.ManufacturerId = pm.ManufacturerId
 `;
 
+// An entry's HSN is always its item's HSN in Item Master, looked up on every
+// save rather than taken from the body (PharmacyItem's column is wider, hence LEFT).
+const ITEM_HSN = 'LEFT((SELECT HSNCode FROM PharmacyItem WHERE ItemId = @itemId), 20)';
+
 // Returns an error message for a bad body, or null when it's valid.
 function validate({ itemId, vendorId, quantity }) {
   if (!itemId) return 'Item is required';
@@ -27,7 +31,6 @@ function validate({ itemId, vendorId, quantity }) {
 function bindFields(request, body) {
   return request
     .input('itemId', sql.Int, body.itemId)
-    .input('hsnCode', sql.NVarChar(20), body.hsnCode?.trim() || null)
     .input('manufacturerId', sql.Int, body.manufacturerId || null)
     .input('vendorId', sql.Int, body.vendorId)
     .input('quantity', sql.Decimal(10, 2), Number(body.quantity))
@@ -68,11 +71,41 @@ router.post('/', async (req, res) => {
       INSERT INTO PurchaseMaster (ItemId, HSNCode, ManufacturerId, VendorId, Quantity, UnitId,
                                   OldPrice, CurrentPrice, GSTPercent, DiscountPercent, NetPrice)
       OUTPUT INSERTED.*
-      VALUES (@itemId, @hsnCode, @manufacturerId, @vendorId, @quantity, @unitId,
+      VALUES (@itemId, ${ITEM_HSN}, @manufacturerId, @vendorId, @quantity, @unitId,
               @oldPrice, @currentPrice, @gstPercent, @discountPercent, @netPrice)
     `);
     res.status(201).json(result.recordset[0]);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The form's several-items save ({ vendorId, lines }): one entry per line, all
+// for the same vendor, saved together or not at all.
+router.post('/multi', async (req, res) => {
+  const { vendorId, lines } = req.body || {};
+  if (!Array.isArray(lines) || lines.length === 0) return res.status(400).json({ error: 'Select an item' });
+  const bodies = lines.map((line) => ({ ...line, vendorId }));
+  for (const body of bodies) {
+    const error = validate(body);
+    if (error) return res.status(400).json({ error });
+  }
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+    for (const body of bodies) {
+      await bindFields(new sql.Request(tx), body).query(`
+        INSERT INTO PurchaseMaster (ItemId, HSNCode, ManufacturerId, VendorId, Quantity, UnitId,
+                                    OldPrice, CurrentPrice, GSTPercent, DiscountPercent, NetPrice)
+        VALUES (@itemId, ${ITEM_HSN}, @manufacturerId, @vendorId, @quantity, @unitId,
+                @oldPrice, @currentPrice, @gstPercent, @discountPercent, @netPrice)
+      `);
+    }
+    await tx.commit();
+    res.status(201).json({ inserted: bodies.length });
+  } catch (err) {
+    await tx.rollback().catch(() => {});
     res.status(500).json({ error: err.message });
   }
 });
@@ -96,7 +129,7 @@ router.post('/bulk', async (req, res) => {
       await bindFields(pool.request(), body).query(`
         INSERT INTO PurchaseMaster (ItemId, HSNCode, ManufacturerId, VendorId, Quantity, UnitId,
                                     OldPrice, CurrentPrice, GSTPercent, DiscountPercent, NetPrice)
-        VALUES (@itemId, @hsnCode, @manufacturerId, @vendorId, @quantity, @unitId,
+        VALUES (@itemId, ${ITEM_HSN}, @manufacturerId, @vendorId, @quantity, @unitId,
                 @oldPrice, @currentPrice, @gstPercent, @discountPercent, @netPrice)
       `);
       inserted++;
@@ -108,9 +141,8 @@ router.post('/bulk', async (req, res) => {
 });
 
 // Fields the form's dropdowns list by value (no master table), with the SQL
-// type each one is stored as. Only HSN is text.
+// type each one is stored as. HSN isn't one: it comes from Item Master.
 const VALUE_FIELDS = {
-  HSNCode: sql.NVarChar(20),
   Quantity: sql.Decimal(10, 2),
   OldPrice: sql.Decimal(10, 2),
   CurrentPrice: sql.Decimal(10, 2),
@@ -128,18 +160,17 @@ router.post('/replace-value', async (req, res) => {
     if (!type) return res.status(400).json({ error: 'Unknown field' });
     if (blank(from)) return res.status(400).json({ error: 'Value to change is required' });
     if (field === 'Quantity' && blank(to)) return res.status(400).json({ error: 'Qty is required on every entry, so it can only be renamed' });
-    const numeric = field !== 'HSNCode';
-    if (numeric && (Number.isNaN(Number(from)) || (!blank(to) && Number.isNaN(Number(to))))) {
+    if (Number.isNaN(Number(from)) || (!blank(to) && Number.isNaN(Number(to)))) {
       return res.status(400).json({ error: 'Value must be a number' });
     }
-    const value = (v) => (blank(v) ? null : numeric ? Number(v) : text(v));
+    const value = (v) => (blank(v) ? null : Number(v));
     const pool = await getPool();
     const upd = await pool.request()
       .input('from', type, value(from))
       .input('to', type, value(to))
       .query(`
         UPDATE PurchaseMaster SET ${field} = @to
-        WHERE IsActive = 1 AND ${numeric ? field : `LTRIM(RTRIM(${field}))`} = @from;
+        WHERE IsActive = 1 AND ${field} = @from;
         SELECT @@ROWCOUNT AS affected;
       `);
     res.json({ affected: upd.recordset[0].affected });
@@ -157,7 +188,7 @@ router.put('/:id', async (req, res) => {
       .input('id', sql.Int, req.params.id)
       .query(`
         UPDATE PurchaseMaster
-        SET ItemId = @itemId, HSNCode = @hsnCode, ManufacturerId = @manufacturerId, VendorId = @vendorId,
+        SET ItemId = @itemId, HSNCode = ${ITEM_HSN}, ManufacturerId = @manufacturerId, VendorId = @vendorId,
             Quantity = @quantity, UnitId = @unitId, OldPrice = @oldPrice, CurrentPrice = @currentPrice,
             GSTPercent = @gstPercent, DiscountPercent = @discountPercent, NetPrice = @netPrice
         OUTPUT INSERTED.*
