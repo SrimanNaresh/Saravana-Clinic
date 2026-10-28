@@ -129,6 +129,9 @@ export const purchaseMasterApi = {
   list: (search = '') => api.get('/purchase-masters', { params: { search } }).then((r) => r.data),
   create: (data) => api.post('/purchase-masters', data).then((r) => r.data),
   update: (id, data) => api.put(`/purchase-masters/${id}`, data).then((r) => r.data),
+  bulk: (rows) => api.post('/purchase-masters/bulk', { rows }).then((r) => r.data),
+  // Renames (or, with a blank `to`, clears) a HSN / Qty / price / GST / discount value on every entry using it.
+  replaceValue: (field, from, to) => api.post('/purchase-masters/replace-value', { field, from, to }).then((r) => r.data),
   remove: (id) => api.delete(`/purchase-masters/${id}`).then((r) => r.data),
 };
 

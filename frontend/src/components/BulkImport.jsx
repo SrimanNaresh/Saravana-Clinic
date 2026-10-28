@@ -182,6 +182,7 @@ export default function BulkImport({ columns, sample = [], fileName = 'template'
           Imported: {result.inserted} inserted, {result.updated} updated
           {result.failed > 0 && `, ${result.failed} failed`}
         </div>
+        {result.note && <p className="mt-1 text-xs text-emerald-700">{result.note}</p>}
         {result.failed > 0 && result.errors?.length > 0 && (
           <ul className="mt-1.5 max-h-32 space-y-0.5 overflow-y-auto text-xs text-red-600">
             {result.errors.slice(0, 20).map((e, idx) => (
