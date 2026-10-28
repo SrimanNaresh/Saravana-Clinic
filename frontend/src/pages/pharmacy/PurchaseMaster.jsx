@@ -324,6 +324,13 @@ export default function PurchaseMaster() {
           />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
+              <label className="label">Vendor *</label>
+              <MasterPicker
+                value={form.vendorId} onChange={(id) => set('vendorId', id)} options={vendors}
+                placeholder="Select vendor" emptyMessage="No vendors yet — add them in Vendor Master."
+              />
+            </div>
+            <div>
               <label className="label">Item Name *</label>
               <MasterPicker
                 value={form.itemId} onChange={pickItem} options={items}
@@ -338,13 +345,6 @@ export default function PurchaseMaster() {
                 onCreated={(row) => setManufacturers((c) => [...c, row].sort((a, b) => a.name.localeCompare(b.name)))}
                 createFn={(name) => manufacturerApi.create({ name }).then((r) => ({ id: r.ManufacturerId, name: r.Name }))}
                 placeholder="Select manufacturer" emptyMessage="No manufacturers yet — type a name to add one" addLabel="as new manufacturer"
-              />
-            </div>
-            <div>
-              <label className="label">Vendor *</label>
-              <MasterPicker
-                value={form.vendorId} onChange={(id) => set('vendorId', id)} options={vendors}
-                placeholder="Select vendor" emptyMessage="No vendors yet — add them in Vendor Master."
               />
             </div>
             {valueBox('quantity')}
