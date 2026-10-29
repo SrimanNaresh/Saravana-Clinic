@@ -20,12 +20,12 @@ const FULL_TEMPLATE = {
   note: "Leave ItemId blank to insert a new item, or fill it to update an existing one. Only ItemName is required — ItemType, Unit, Generic Name, Manufacturer and Supplier accept any value from their dropdown, or a brand-new one (it'll be added automatically). A simpler sheet with just some columns (e.g. Item Name, MRP, Selprice) also works — missing columns are left blank.",
 };
 
-// ItemList new's shorter template. Headers are display names; they map onto
+// Bulk Itemlist's shorter template. Headers are display names; they map onto
 // the same fields through HEADER_MAP below.
 export const ITEM_LIST_TEMPLATE = {
   fileName: 'pharmacy-item-list',
-  columns: ['Item Code', 'Item Name', 'Generic Name', 'Manufacturer', 'HSN', 'MRP', 'Unit', 'GST', 'Sell Price', 'Rack', 'Box No'],
-  sample: [['', 'Paracetamol 500mg', 'Acetaminophen', 'GSK', '3004', '18.00', 'Strip', '12', '15.00', 'R1', 'B12']],
+  columns: ['Item Code', 'Item Name', 'Generic Name', 'Manufacturer', 'HSN', 'MRP', 'Unit', 'Pack', 'GST', 'Sell Price', 'Rack', 'Box No'],
+  sample: [['', 'Paracetamol 500mg', 'Acetaminophen', 'GSK', '3004', '18.00', 'Strip', '10s', '12', '15.00', 'R1', 'B12']],
   note: 'Leave Item Code blank to add a new item, or keep an existing code (e.g. ITM000042) to update that item. Only Item Name is required — Generic Name, Manufacturer and Unit accept any value from their dropdown, or a brand-new one. A price list with Qty fills Unit. Updating an item only changes the columns in this sheet.',
   // The clinic's price-list sheets carry "Qty" where this screen shows Unit.
   aliases: { qty: 'Unit', quantity: 'Unit' },
@@ -36,7 +36,7 @@ export const ITEM_LIST_TEMPLATE = {
 // matched ignoring case/spaces/punctuation, plus a few common aliases.
 // Columns not present in the file are simply left blank (stored as NULL).
 const keyOf = (h) => String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
-const HEADER_MAP = Object.fromEntries([...TEMPLATE_COLUMNS, 'ItemCode', 'Rack', 'BoxNo'].map((c) => [keyOf(c), c]));
+const HEADER_MAP = Object.fromEntries([...TEMPLATE_COLUMNS, 'ItemCode', 'Rack', 'BoxNo', 'Pack'].map((c) => [keyOf(c), c]));
 Object.assign(HEADER_MAP, {
   item: 'ItemName', name: 'ItemName', selprice: 'SellPrice', sellingprice: 'SellPrice',
   saleprice: 'SellPrice', salesprice: 'SellPrice', gst: 'GSTPercent', discount: 'DiscountPercent',
@@ -58,7 +58,7 @@ function normalizeRow(row, headerMap) {
 
 /**
  * Template download + Excel/CSV upload for pharmacy items, shared by the
- * Add Item and ItemList new screens.
+ * Add Item and Bulk Itemlist screens.
  *  - masters:    useItemMasters() result (template dropdowns; reloaded after import)
  *  - template:   optional { fileName, columns, sample, note, aliases }; defaults to
  *                Add Item's. aliases adds header -> field matches for this template only.

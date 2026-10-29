@@ -20,7 +20,7 @@ const SELECT_COLUMNS = `
   i.ManufacturerId, m.Name AS ManufacturerName,
   i.SupplierId, s.Name AS SupplierName,
   i.ScheduleH, i.ScheduleH1, i.GenericNameId, g.Name AS GenericNameName, i.TabletName,
-  i.PurchaseRate, i.GSTPercent, i.MRP, i.SellPrice, i.DiscountPercent, i.Rack, i.BoxNo, i.EditedAt, i.CreatedAt
+  i.PurchaseRate, i.GSTPercent, i.MRP, i.SellPrice, i.DiscountPercent, i.Rack, i.BoxNo, i.Pack, i.EditedAt, i.CreatedAt
 `;
 
 function bindItemFields(request, body) {
@@ -42,7 +42,8 @@ function bindItemFields(request, body) {
     .input('sellPrice', sql.Decimal(10, 2), num(body.sellPrice))
     .input('discountPercent', sql.Decimal(5, 2), num(body.discountPercent))
     .input('rack', sql.NVarChar, body.rack?.toString().trim() || null)
-    .input('boxNo', sql.NVarChar, body.boxNo?.toString().trim() || null);
+    .input('boxNo', sql.NVarChar, body.boxNo?.toString().trim() || null)
+    .input('pack', sql.NVarChar, body.pack?.toString().trim() || null);
 }
 
 router.get('/', async (req, res) => {
@@ -160,6 +161,7 @@ const BULK_COLUMNS = [
   ['DiscountPercent', 'DiscountPercent', 'discountPercent'],
   ['ScheduleH', 'ScheduleH', 'scheduleH'], ['ScheduleH1', 'ScheduleH1', 'scheduleH1'],
   ['Rack', 'Rack', 'rack'], ['BoxNo', 'BoxNo', 'boxNo'],
+  ['Pack', 'Pack', 'pack'],
 ];
 
 const hasKey = (r, key) => Object.prototype.hasOwnProperty.call(r, key);
@@ -179,14 +181,14 @@ async function templateRowToBody(pool, r, name) {
     purchaseRate: r.PurchaseRate, gstPercent: r.GSTPercent, mrp: r.MRP,
     sellPrice: r.SellPrice, discountPercent: r.DiscountPercent,
     scheduleH: toBool(r.ScheduleH), scheduleH1: toBool(r.ScheduleH1),
-    rack: r.Rack, boxNo: r.BoxNo,
+    rack: r.Rack, boxNo: r.BoxNo, pack: r.Pack,
   };
 }
 
 // SET assignments for just the template columns present in the row.
 const presentColumnSets = (r) => BULK_COLUMNS.filter(([key]) => hasKey(r, key)).map(([, col, param]) => `${col} = @${param}`);
 
-// Partial update from ItemList new's fill-in cells: only the fields sent
+// Partial update from Bulk Itemlist's fill-in cells: only the fields sent
 // (template-keyed, e.g. { GenericName, Rack }) change; everything else stays.
 router.patch('/:id', async (req, res) => {
   try {
@@ -209,17 +211,18 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-// Free-text fields ItemList new's dropdowns list by value (they have no
+// Free-text fields Bulk Itemlist's dropdowns list by value (they have no
 // master table), with the column and SQL type each one is stored as.
 const VALUE_FIELDS = {
   HSNCode: ['HSNCode', sql.NVarChar(20)],
   GSTPercent: ['GSTPercent', sql.Decimal(5, 2)],
   Rack: ['Rack', sql.NVarChar(50)],
   BoxNo: ['BoxNo', sql.NVarChar(50)],
+  Pack: ['Pack', sql.NVarChar(50)],
 };
 
 // Renames one of those values on every item using it ({ field, from, to }),
-// or clears it when `to` is blank — ItemList new's dropdown Edit / Delete.
+// or clears it when `to` is blank — Bulk Itemlist's dropdown Edit / Delete.
 router.post('/replace-value', async (req, res) => {
   try {
     const { field, from, to } = req.body || {};
@@ -254,7 +257,7 @@ router.post('/replace-value', async (req, res) => {
 // (matching the Excel template's dropdown columns) and resolved to their
 // master-table IDs, creating a new master row for any name not already on
 // file. An update only touches the columns the uploaded sheet actually has,
-// so a shorter template (e.g. ItemList new's) never blanks the rest.
+// so a shorter template (e.g. Bulk Itemlist's) never blanks the rest.
 router.post('/bulk', async (req, res) => {
   const { rows } = req.body;
   if (!Array.isArray(rows) || rows.length === 0) {

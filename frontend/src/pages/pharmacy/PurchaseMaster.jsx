@@ -5,24 +5,52 @@ import { CardHeader, Toast } from '../../components/ui.jsx';
 import BulkImport from '../../components/BulkImport.jsx';
 import { useToast } from '../../hooks/useToast.js';
 import { pharmacyItemApi, vendorApi, unitApi, manufacturerApi, purchaseMasterApi } from '../../api/client.js';
-import { MasterPicker } from './itemFormParts.jsx';
 import CellCombo from './CellCombo.jsx';
 
-// One vendor and a line per item picked: adding saves a purchase entry per
-// line; editing an entry has exactly one line.
-const emptyForm = { vendorId: '', lines: [] };
+// One vendor and a line per item: adding saves a purchase entry per filled
+// line (blank lines are skipped); editing an entry has exactly one line.
+// Each line's item is searched for in its own Item cell.
 const emptyLine = {
-  itemId: '', manufacturerName: '', quantity: '', unitName: '',
+  itemId: '', itemName: '', manufacturerName: '', quantity: '', unitName: '',
   oldPrice: '', currentPrice: '', gstPercent: '', discountPercent: '', netPrice: '',
 };
+// Lines get a running key for React, since a line's item can change or be blank.
+let lineSeq = 0;
+const newLine = () => ({ ...emptyLine, key: ++lineSeq });
+const BLANK_LINES = 3;
+const blankForm = () => ({ vendorName: '', lines: Array.from({ length: BLANK_LINES }, newLine) });
+const isBlankLine = (line) => Object.keys(emptyLine).every((k) => String(line[k]).trim() === '');
+
+// Round "add a row" button: a filled circle with an outlined plus.
+function AddRowButton({ size, onClick, title, className = '' }) {
+  return (
+    <button
+      type="button" onClick={onClick} title={title} aria-label={title}
+      className={`shrink-0 rounded-full text-ink-900 transition-colors hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${className}`}
+    >
+      <svg viewBox="0 0 512 512" width={size} height={size} aria-hidden="true" className="block">
+        <circle cx="256" cy="256" r="256" fill="currentColor" />
+        <path
+          d="M226 156A30 30 0 0 1 286 156V226H356A30 30 0 0 1 356 286H286V356A30 30 0 0 1 226 356V286H156A30 30 0 0 1 156 226H226Z"
+          fill="none" stroke="white" strokeWidth="20" strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
 
 // Every value box is text (they're typeahead boxes), so numbers are kept as strings.
 const str = (v) => (v === null || v === undefined ? '' : String(v));
 
+const toItem = (r) => ({
+  id: r.ItemId, name: r.Name, unitName: r.UnitName, manufacturerName: r.ManufacturerName,
+  gstPercent: r.GSTPercent, discountPercent: r.DiscountPercent, purchaseRate: r.PurchaseRate,
+});
+
 const rowToForm = (r) => ({
-  vendorId: r.VendorId ?? '',
+  vendorName: str(r.VendorName),
   lines: [{
-    itemId: r.ItemId ?? '', manufacturerName: str(r.ManufacturerName),
+    key: ++lineSeq, itemId: r.ItemId ?? '', itemName: str(r.ItemName), manufacturerName: str(r.ManufacturerName),
     quantity: str(r.Quantity), unitName: str(r.UnitName),
     oldPrice: str(r.OldPrice), currentPrice: str(r.CurrentPrice),
     gstPercent: str(r.GSTPercent), discountPercent: str(r.DiscountPercent), netPrice: str(r.NetPrice),
@@ -42,7 +70,7 @@ function netPriceOf({ quantity, currentPrice, gstPercent, discountPercent }) {
 const NET_INPUTS = ['quantity', 'currentPrice', 'gstPercent', 'discountPercent'];
 const withNet = (f) => ({ ...f, netPrice: netPriceOf(f) });
 
-// Each line's value boxes, like ItemList new's GST cells: each one's dropdown
+// Each line's value boxes, like Bulk Itemlist's GST cells: each one's dropdown
 // lists the values already used on purchase entries, "Add" keeps a typed
 // value, and Edit / Delete rename or clear a value on every entry that has
 // it. `field` is the PurchaseMaster column (and list row key).
@@ -92,7 +120,7 @@ export default function PurchaseMaster() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast, show } = useToast();
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(blankForm);
   // Set when Purchase Master List's Edit opened a record here; null while adding new ones.
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -112,12 +140,10 @@ export default function PurchaseMaster() {
     .then((rows) => setUnits(rows.map((r) => ({ id: r.UnitId, name: r.Name }))))
     .catch(() => show('Failed to load units', 'error')), [show]);
   const loadPurchases = useCallback(() => purchaseMasterApi.list().then(setPurchases).catch(() => {}), []);
-  const loadItems = useCallback(() => pharmacyItemApi.list().then((rows) => setItems(rows.map((r) => ({
-    id: r.ItemId, name: r.Name, unitName: r.UnitName, manufacturerName: r.ManufacturerName,
-    gstPercent: r.GSTPercent, discountPercent: r.DiscountPercent, purchaseRate: r.PurchaseRate,
-  })))).catch(() => show('Failed to load items', 'error')), [show]);
+  const loadItems = useCallback(() => pharmacyItemApi.list().then((rows) => setItems(rows.map(toItem)))
+    .catch(() => show('Failed to load items', 'error')), [show]);
   const loadVendors = useCallback(() => vendorApi.list()
-    .then((rows) => setVendors(rows.map((r) => ({ id: r.VendorId, name: r.VendorName }))))
+    .then((rows) => setVendors(rows.map((r) => ({ id: r.VendorId, name: r.VendorName, row: r }))))
     .catch(() => show('Failed to load vendors', 'error')), [show]);
   // Import can add items, vendors, manufacturers and units, so it reloads them all.
   const loadAll = useCallback(() => {
@@ -181,14 +207,34 @@ export default function PurchaseMaster() {
     });
   };
 
-  // Adding: the picker holds several items, one line each (a line already
-  // there keeps what was typed into it).
-  const pickItems = (ids) => setForm((c) => ({
+  // Item cell: typing a name that matches an item (ignoring case) picks it and
+  // fills the line; any other text leaves the line without an item. Text that
+  // still names the line's item keeps it — that covers an item just added
+  // from the dropdown, which isn't in `items` yet when its name comes back.
+  const setItemName = (index, text) => setForm((c) => ({
     ...c,
-    lines: ids.map((id) => c.lines.find((l) => String(l.itemId) === String(id)) || lineFor(id)),
+    lines: c.lines.map((line, i) => {
+      if (i !== index) return line;
+      const typed = text.trim().toLowerCase();
+      const match = items.find((it) => it.name.toLowerCase() === typed);
+      if (match && String(match.id) !== String(line.itemId)) return { ...lineFor(match.id, line), itemName: text };
+      const keep = match || (line.itemId && line.itemName.trim().toLowerCase() === typed);
+      return { ...line, itemName: text, itemId: keep ? line.itemId : '' };
+    }),
   }));
-  // Editing: one item, swapped in place.
-  const pickItem = (id) => setForm((c) => ({ ...c, lines: [lineFor(id, c.lines[0])] }));
+  // A name not in Item Master can be added to it from the dropdown, as in Bulk Itemlist.
+  const itemHandlers = (index) => ({
+    createFn: (name) => pharmacyItemApi.create({ name }).then(toItem),
+    onCreated: (item) => {
+      setItems((c) => [...c, item]);
+      setForm((c) => ({ ...c, lines: c.lines.map((l, i) => (i === index ? { ...l, itemId: item.id, itemName: item.name } : l)) }));
+    },
+    addLabel: 'as new item',
+  });
+  // A new blank line goes just below line `after`, or at the end.
+  const addLine = (after = form.lines.length - 1) => setForm((c) => ({
+    ...c, lines: [...c.lines.slice(0, after + 1), newLine(), ...c.lines.slice(after + 1)],
+  }));
   const removeLine = (index) => setForm((c) => ({ ...c, lines: c.lines.filter((_, i) => i !== index) }));
 
   // Value box Edit / Delete: rename or clear the value on every saved entry.
@@ -246,6 +292,32 @@ export default function PurchaseMaster() {
     addLabel: 'as new manufacturer',
   };
 
+  // Vendor box: names from Vendor Master; a new name is added to it (just the
+  // name; the rest of its details can be filled in Vendor Master later).
+  const vendorHandlers = {
+    createFn: (vendorName) => vendorApi.create({ vendorName })
+      .then((r) => ({ id: r.VendorId, name: r.VendorName, row: r })),
+    onCreated: (row) => setVendors((c) => [row, ...c]),
+    addLabel: 'as new vendor',
+    // The vendor update replaces every field, so the rest are sent back as they are.
+    onRename: async (opt, vendorName) => {
+      const r = opt.row;
+      await vendorApi.update(opt.id, {
+        vendorName, companyName: r.CompanyName, contactPerson: r.ContactPerson, contactNo: r.ContactNo,
+        alternateNo: r.AlternateNo, address: r.Address, gstNo: r.GSTNo, dlNo: r.DLNo, email: r.Email,
+      });
+      await loadVendors();
+      show(`Renamed vendor "${opt.name}" to "${vendorName}"`, 'success');
+    },
+    onDelete: async (opt) => {
+      if (!confirm(`Delete vendor "${opt.name}"?`)) return false;
+      await vendorApi.remove(opt.id);
+      await loadVendors();
+      show(`Deleted vendor "${opt.name}"`, 'success');
+      return true;
+    },
+  };
+
   const cellClass = 'input py-1.5 text-sm';
   const valueCell = (index, key) => (
     <td className="px-1 py-1.5">
@@ -261,7 +333,7 @@ export default function PurchaseMaster() {
 
   const cancel = () => {
     if (editingId) return backToList();
-    setForm(emptyForm);
+    setForm(blankForm());
   };
 
   // Turns a typed master name into its id, adding it to the master when new.
@@ -283,11 +355,17 @@ export default function PurchaseMaster() {
 
   const save = async (e) => {
     e.preventDefault();
-    if (!form.vendorId) return show('Select a vendor', 'error');
-    if (form.lines.length === 0) return show('Select an item', 'error');
-    for (const line of form.lines) {
+    if (!form.vendorName.trim()) return show('Select a vendor', 'error');
+    const lines = form.lines.filter((l) => !isBlankLine(l));
+    if (lines.length === 0) return show('Add an item to the list', 'error');
+    const noItem = lines.find((l) => !l.itemId);
+    if (noItem) {
+      const typed = noItem.itemName.trim();
+      return show(typed ? `"${typed}" is not in Item Master — pick it from the list or add it` : 'Pick an item on every filled row', 'error');
+    }
+    for (const line of lines) {
       // Several lines: say which item a problem is on.
-      const on = form.lines.length > 1 ? `${itemOf(line.itemId)?.name ?? 'Item'}: ` : '';
+      const on = lines.length > 1 ? `${itemOf(line.itemId)?.name ?? 'Item'}: ` : '';
       if (!(Number(line.quantity) > 0)) return show(`${on}Qty must be a number greater than 0`, 'error');
       const notNumber = Object.entries(VALUE_BOXES)
         .find(([key, b]) => b.numeric && line[key].trim() !== '' && Number.isNaN(Number(line[key])));
@@ -297,18 +375,19 @@ export default function PurchaseMaster() {
     try {
       const unitId = resolver(units, unitHandlers);
       const manufacturerId = resolver(manufacturers, manufacturerHandlers);
+      const vendorId = await resolver(vendors, vendorHandlers)(form.vendorName);
       const bodies = [];
-      for (const { unitName, manufacturerName, ...rest } of form.lines) {
+      for (const { unitName, manufacturerName, key, itemName, ...rest } of lines) {
         bodies.push({ ...rest, unitId: await unitId(unitName), manufacturerId: await manufacturerId(manufacturerName) });
       }
       if (editingId) {
-        await purchaseMasterApi.update(editingId, { ...bodies[0], vendorId: form.vendorId });
+        await purchaseMasterApi.update(editingId, { ...bodies[0], vendorId });
         show('Purchase updated successfully', 'success');
       } else {
-        const { inserted } = await purchaseMasterApi.createMany(form.vendorId, bodies);
+        const { inserted } = await purchaseMasterApi.createMany(vendorId, bodies);
         show(inserted === 1 ? 'Purchase saved successfully' : `${inserted} purchases saved successfully`, 'success');
       }
-      setForm(emptyForm);
+      setForm(blankForm());
       setEditingId(null);
       loadPurchases();
     } catch (err) {
@@ -324,7 +403,7 @@ export default function PurchaseMaster() {
     try {
       await purchaseMasterApi.remove(editingId);
       show('Purchase deleted successfully', 'success');
-      setForm(emptyForm);
+      setForm(blankForm());
       setEditingId(null);
       loadPurchases();
     } catch (err) {
@@ -372,85 +451,87 @@ export default function PurchaseMaster() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Vendor *</label>
-              <MasterPicker
-                value={form.vendorId} onChange={(id) => setForm((c) => ({ ...c, vendorId: id }))} options={vendors}
-                placeholder="Select vendor" emptyMessage="No vendors yet — add them in Vendor Master."
+              <CellCombo
+                className="input" placeholder="Select or type a vendor"
+                value={form.vendorName} onChange={(v) => setForm((c) => ({ ...c, vendorName: v }))} options={vendors}
+                {...vendorHandlers}
               />
-            </div>
-            <div>
-              <label className="label">{editingId ? 'Item Name *' : 'Item Names *'}</label>
-              {editingId ? (
-                <MasterPicker
-                  value={form.lines[0]?.itemId ?? ''} onChange={pickItem} options={items}
-                  placeholder="Select item" emptyMessage="No items yet — add them in Item."
-                />
-              ) : (
-                <MasterPicker
-                  multiple value={form.lines.map((l) => l.itemId)} onChange={pickItems} options={items}
-                  placeholder="Select one or more items" emptyMessage="No items yet — add them in Item."
-                />
-              )}
             </div>
           </div>
 
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-ink-50 text-xs font-semibold uppercase text-ink-500">
-                <tr>
-                  <th className="rounded-l-lg px-2 py-2">Item</th>
-                  <th className="px-1 py-2">Manufacturer</th>
-                  <th className="px-1 py-2">Qty *</th>
-                  <th className="px-1 py-2">Unit</th>
-                  <th className="px-1 py-2">Old Price</th>
-                  <th className="px-1 py-2">Current Price</th>
-                  <th className="px-1 py-2">GST %</th>
-                  <th className="px-1 py-2">Discount %</th>
-                  <th className="px-1 py-2">Net Price</th>
-                  <th className="rounded-r-lg px-1 py-2" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink-100">
-                {form.lines.length === 0 && (
+          <div className="mt-4">
+            <div className="max-h-[22rem] overflow-auto rounded-lg border border-ink-100">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-ink-50 text-xs font-semibold uppercase text-ink-500">
                   <tr>
-                    <td colSpan={10} className="px-2 py-6 text-center text-sm text-ink-400">
-                      Select items in Item Names — each item gets a row here for its Manufacturer, Qty, Unit and prices.
-                    </td>
+                    <th className="rounded-l-lg px-2 py-2">Item *</th>
+                    <th className="px-1 py-2">Manufacturer</th>
+                    <th className="px-1 py-2">Qty *</th>
+                    <th className="px-1 py-2">Unit</th>
+                    <th className="px-1 py-2">Old Price</th>
+                    <th className="px-1 py-2">Current Price</th>
+                    <th className="px-1 py-2">GST %</th>
+                    <th className="px-1 py-2">Discount %</th>
+                    <th className="px-1 py-2">Net Price</th>
+                    <th className="rounded-r-lg px-1 py-2" />
                   </tr>
-                )}
-                {form.lines.map((line, index) => (
-                  <tr key={line.itemId}>
-                    <td className="px-2 py-1.5 font-medium text-ink-800">{itemOf(line.itemId)?.name ?? '-'}</td>
-                    <td className="px-1 py-1.5">
-                      <CellCombo
-                        className={`${cellClass} w-40`} placeholder="Select manufacturer"
-                        value={line.manufacturerName} onChange={(v) => setLine(index, 'manufacturerName', v)}
-                        options={manufacturers} {...manufacturerHandlers}
-                      />
-                    </td>
-                    {valueCell(index, 'quantity')}
-                    <td className="px-1 py-1.5">
-                      <CellCombo
-                        className={`${cellClass} w-28`} placeholder="Select unit"
-                        value={line.unitName} onChange={(v) => setLine(index, 'unitName', v)} options={units}
-                        {...unitHandlers}
-                      />
-                    </td>
-                    {valueCell(index, 'oldPrice')}
-                    {valueCell(index, 'currentPrice')}
-                    {valueCell(index, 'gstPercent')}
-                    {valueCell(index, 'discountPercent')}
-                    {valueCell(index, 'netPrice')}
-                    <td className="px-1 py-1.5">
-                      {!editingId && (
-                        <button type="button" className="rounded p-1 text-ink-400 hover:bg-red-50 hover:text-red-600" onClick={() => removeLine(index)} title="Remove this item">
-                          <X size={16} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {form.lines.length === 0 && (
+                    <tr>
+                      <td colSpan={10} className="px-2 py-6 text-center text-sm text-ink-400">
+                        No rows — use the + below to add an item.
+                      </td>
+                    </tr>
+                  )}
+                  {form.lines.map((line, index) => (
+                    <tr key={line.key}>
+                      <td className="px-1 py-1.5">
+                        <CellCombo
+                          className={`${cellClass} w-48`} placeholder="Search item"
+                          value={line.itemName} onChange={(v) => setItemName(index, v)} options={items}
+                          {...itemHandlers(index)}
+                        />
+                      </td>
+                      <td className="px-1 py-1.5">
+                        <CellCombo
+                          className={`${cellClass} w-40`} placeholder="Select manufacturer"
+                          value={line.manufacturerName} onChange={(v) => setLine(index, 'manufacturerName', v)}
+                          options={manufacturers} {...manufacturerHandlers}
+                        />
+                      </td>
+                      {valueCell(index, 'quantity')}
+                      <td className="px-1 py-1.5">
+                        <CellCombo
+                          className={`${cellClass} w-28`} placeholder="Select unit"
+                          value={line.unitName} onChange={(v) => setLine(index, 'unitName', v)} options={units}
+                          {...unitHandlers}
+                        />
+                      </td>
+                      {valueCell(index, 'oldPrice')}
+                      {valueCell(index, 'currentPrice')}
+                      {valueCell(index, 'gstPercent')}
+                      {valueCell(index, 'discountPercent')}
+                      {valueCell(index, 'netPrice')}
+                      <td className="px-1 py-1.5">
+                        {!editingId && (
+                          <div className="flex items-center gap-1">
+                            <AddRowButton size={24} onClick={() => addLine(index)} title="Add a new row below this one" />
+                            <button type="button" className="rounded p-1 text-ink-400 hover:bg-red-50 hover:text-red-600" onClick={() => removeLine(index)} title="Remove this item">
+                              <X size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* With every row removed there's no row icon left, so one shows here. */}
+            {!editingId && form.lines.length === 0 && (
+              <AddRowButton size={32} onClick={() => addLine()} title="Add a new row" className="mt-2" />
+            )}
           </div>
 
           <div className="mt-4 flex justify-center gap-2">

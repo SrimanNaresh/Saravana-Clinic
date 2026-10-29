@@ -20,12 +20,13 @@ const FILL_COLUMNS = [
   { field: 'HSNCode', rowKey: 'HSNCode', suggest: 'as new HSN code', width: 'w-20' },
   { field: 'MRP', rowKey: 'MRP', numeric: true, width: 'w-20' },
   { field: 'Unit', rowKey: 'UnitName', list: 'units', width: 'w-20' },
+  { field: 'Pack', rowKey: 'Pack', suggest: 'as new pack', width: 'w-16' },
   { field: 'GSTPercent', rowKey: 'GSTPercent', numeric: true, suggest: 'as new GST %', width: 'w-16' },
   { field: 'SellPrice', rowKey: 'SellPrice', numeric: true, width: 'w-20' },
   { field: 'Rack', rowKey: 'Rack', suggest: 'as new rack', width: 'w-16' },
   { field: 'BoxNo', rowKey: 'BoxNo', suggest: 'as new box no', width: 'w-16' },
 ];
-// HSN / GST / Rack / Box No (`suggest` set) have no master table: their dropdowns
+// HSN / GST / Rack / Box No / Pack (`suggest` set) have no master table: their dropdowns
 // list the values already used on items, and "Add" just keeps the typed
 // value (offered to the other rows too until the list reloads).
 const addLocal = (name) => Promise.resolve({ id: name, name });
@@ -262,7 +263,7 @@ export default function ItemListNew() {
       <div className="card">
         <CardHeader
           icon={Package}
-          title="ItemList new"
+          title="Bulk Itemlist"
           subtitle="Download the template, upload items and view the list"
           actions={
             <>
@@ -304,6 +305,7 @@ export default function ItemListNew() {
                   <th className="px-3 py-1.5">HSN</th>
                   <th className="px-3 py-1.5">MRP</th>
                   <th className="px-3 py-1.5">Unit</th>
+                  <th className="px-3 py-1.5">Pack</th>
                   <th className="px-3 py-1.5">GST</th>
                   <th className="px-3 py-1.5">Sell Price</th>
                   <th className="px-3 py-1.5">Rack</th>
@@ -313,7 +315,7 @@ export default function ItemListNew() {
               <tbody>
                 {!showRows ? (
                   <tr>
-                    <td colSpan={11}>
+                    <td colSpan={12}>
                       {listShown && loading ? <Spinner /> : (
                         <EmptyState message={listShown ? 'No items found.' : 'No items to show. Upload an item sheet or click View List.'} />
                       )}

@@ -4,7 +4,7 @@ import { Check, X, Plus, Pencil, Trash2 } from 'lucide-react';
 
 const MAX_SUGGESTIONS = 50;
 
-// A text box with a searchable dropdown of names (ItemList new's cells,
+// A text box with a searchable dropdown of names (Bulk Itemlist's cells,
 // Purchase Master's value boxes), like the Item screen's MasterPicker: typing filters the names, and a name that matches
 // none (ignoring case) offers an "Add" option. The footer has New / Edit /
 // Delete: Edit and Delete act on the highlighted name (picked with the arrow

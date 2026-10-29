@@ -364,12 +364,15 @@ IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SellPrice' AND Object_ID=Ob
     ALTER TABLE PharmacyItem ADD SellPrice DECIMAL(10,2) NULL;
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscountPercent' AND Object_ID=Object_ID('PharmacyItem'))
     ALTER TABLE PharmacyItem ADD DiscountPercent DECIMAL(5,2) NULL;
--- Where the item sits on the shelf — filled from the ItemList new upload template.
+-- Where the item sits on the shelf — filled from the Bulk Itemlist upload template.
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Rack' AND Object_ID=Object_ID('PharmacyItem'))
     ALTER TABLE PharmacyItem ADD Rack NVARCHAR(50) NULL;
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='BoxNo' AND Object_ID=Object_ID('PharmacyItem'))
     ALTER TABLE PharmacyItem ADD BoxNo NVARCHAR(50) NULL;
--- Last save from ItemList new's row edit; that screen moves edited items to the bottom of their page.
+-- Pack size (e.g. 10's, 1x15) — typed in Bulk Itemlist or uploaded with its template.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Pack' AND Object_ID=Object_ID('PharmacyItem'))
+    ALTER TABLE PharmacyItem ADD Pack NVARCHAR(50) NULL;
+-- Last save from Bulk Itemlist's row edit; that screen moves edited items to the bottom of their page.
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='EditedAt' AND Object_ID=Object_ID('PharmacyItem'))
     ALTER TABLE PharmacyItem ADD EditedAt DATETIME NULL;
 

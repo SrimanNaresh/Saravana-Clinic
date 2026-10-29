@@ -178,7 +178,7 @@ export const pharmacyItemApi = {
   update: (id, data) => api.put(`/pharmacy-items/${id}`, data).then((r) => r.data),
   // Changes only the template-keyed fields given, e.g. { GenericName, Rack }.
   patch: (id, fields) => api.patch(`/pharmacy-items/${id}`, fields).then((r) => r.data),
-  // Renames (or, with a blank `to`, clears) a HSN / GST / Rack / Box No value on every item using it.
+  // Renames (or, with a blank `to`, clears) a HSN / GST / Rack / Box No / Pack value on every item using it.
   replaceValue: (field, from, to) => api.post('/pharmacy-items/replace-value', { field, from, to }).then((r) => r.data),
   remove: (id) => api.delete(`/pharmacy-items/${id}`).then((r) => r.data),
   bulk: (rows) => api.post('/pharmacy-items/bulk', { rows }).then((r) => r.data),

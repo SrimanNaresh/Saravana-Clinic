@@ -32,8 +32,7 @@ export const MENU_GROUPS = [
     items: [
       { key: 'pharmacy.supplier', label: 'Supplier', to: '/pharmacy/supplier' },
       { key: 'pharmacy.item', label: 'Item', to: '/pharmacy/item' },
-      { key: 'pharmacy.item-list', label: 'Item List', to: '/pharmacy/item-list' },
-      { key: 'pharmacy.item-list-new', label: 'ItemList new', to: '/pharmacy/item-list-new' },
+      { key: 'pharmacy.item-list-new', label: 'Bulk Itemlist', to: '/pharmacy/item-list-new' },
       {
         label: 'Vendor',
         submenu: [
