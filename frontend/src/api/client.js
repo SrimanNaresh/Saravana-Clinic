@@ -201,6 +201,29 @@ function transactionApi(basePath) {
     remove: (id) => api.delete(`/${basePath}/${id}`).then((r) => r.data),
   };
 }
+export const itemMasterApi = {
+  // params: { status: 'Active' } to leave out inactive items
+  list: (params) => api.get('/item-master', { params }).then((r) => r.data),
+  get: (id) => api.get(`/item-master/${id}`).then((r) => r.data),
+  create: (data) => api.post('/item-master', data).then((r) => r.data),
+  update: (id, data) => api.put(`/item-master/${id}`, data).then((r) => r.data),
+  // rows: [{ itemId, ...changed fields }]; all saved or none
+  bulkUpdate: (rows) => api.post('/item-master/bulk-update', { rows }).then((r) => r.data),
+  // Pick-lists: { unit, generic, manufacturer, category, potency: [{ id, name }], pack: [name] }
+  lists: () => api.get('/item-master/lists').then((r) => r.data),
+  addListValue: (field, name) => api.post(`/item-master/lists/${field}`, { name }).then((r) => r.data),
+  renameListValue: (field, id, name) => api.put(`/item-master/lists/${field}/${id}`, { name }).then((r) => r.data),
+  removeListValue: (field, id) => api.delete(`/item-master/lists/${field}/${id}`).then((r) => r.data),
+};
+
+export const purchaseOrderApi = {
+  list: (search = '') => api.get('/purchase-orders', { params: { search } }).then((r) => r.data),
+  get: (id) => api.get(`/purchase-orders/${id}`).then((r) => r.data),
+  create: (data) => api.post('/purchase-orders', data).then((r) => r.data),
+  update: (id, data) => api.put(`/purchase-orders/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/purchase-orders/${id}`).then((r) => r.data),
+};
+
 export const pharmacyReportApi = {
   // params: { search, category, show: 'history' | 'instock' | 'outofstock' | 'all' }
   stock: (params) => api.get('/pharmacy-reports/stock', { params }).then((r) => r.data),

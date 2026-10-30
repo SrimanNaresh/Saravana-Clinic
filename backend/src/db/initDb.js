@@ -620,6 +620,77 @@ CREATE TABLE StockMovement (
     CONSTRAINT FK_StockMovement_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
 );
 
+-- Item Master: GST split into CGST + SGST (GSTPercent stays their sum, for
+-- billing), Potency, and an Active / Inactive status (IsActive stays the
+-- soft-delete flag).
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='CGSTPercent' AND Object_ID=Object_ID('PharmacyItem'))
+    ALTER TABLE PharmacyItem ADD CGSTPercent DECIMAL(5,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SGSTPercent' AND Object_ID=Object_ID('PharmacyItem'))
+    ALTER TABLE PharmacyItem ADD SGSTPercent DECIMAL(5,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Potency' AND Object_ID=Object_ID('PharmacyItem'))
+    ALTER TABLE PharmacyItem ADD Potency NVARCHAR(50) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Status' AND Object_ID=Object_ID('PharmacyItem'))
+    ALTER TABLE PharmacyItem ADD Status NVARCHAR(10) NOT NULL DEFAULT 'Active';
+
+-- Item Master's Category and Potency pick-lists (items store the text). Delete
+-- only hides a value; SortOrder keeps the seeded values in their usual order.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='CategoryMaster' AND xtype='U')
+CREATE TABLE CategoryMaster (
+    CategoryId INT IDENTITY(1,1) PRIMARY KEY,
+    Name       NVARCHAR(100) NOT NULL,
+    SortOrder  INT NOT NULL DEFAULT 0,
+    IsActive   BIT NOT NULL DEFAULT 1,
+    CreatedAt  DATETIME NOT NULL DEFAULT GETDATE()
+);
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='PotencyMaster' AND xtype='U')
+CREATE TABLE PotencyMaster (
+    PotencyId  INT IDENTITY(1,1) PRIMARY KEY,
+    Name       NVARCHAR(50) NOT NULL,
+    SortOrder  INT NOT NULL DEFAULT 0,
+    IsActive   BIT NOT NULL DEFAULT 1,
+    CreatedAt  DATETIME NOT NULL DEFAULT GETDATE()
+);
+
+-- Pharmacy > Purchase / Order: an order placed with a vendor (it doesn't
+-- change stock). Each line copies the item's details as they were, so an old
+-- order keeps them after the item changes. Number: SC-PO0001 from the id.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='PurchaseOrder' AND xtype='U')
+CREATE TABLE PurchaseOrder (
+    PurchaseOrderId INT IDENTITY(1,1) PRIMARY KEY,
+    OrderDate       DATE NOT NULL,
+    VendorId        INT NOT NULL,
+    VendorDetails   NVARCHAR(1000) NULL,
+    TotalAmount     DECIMAL(12,2) NOT NULL DEFAULT 0,
+    CreatedBy       NVARCHAR(100) NULL,
+    IsActive        BIT NOT NULL DEFAULT 1,
+    CreatedAt       DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_PurchaseOrder_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId)
+);
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='PurchaseOrderItem' AND xtype='U')
+CREATE TABLE PurchaseOrderItem (
+    LineId           INT IDENTITY(1,1) PRIMARY KEY,
+    PurchaseOrderId  INT NOT NULL,
+    ItemId           INT NOT NULL,
+    ItemName         NVARCHAR(200) NOT NULL,
+    GenericName      NVARCHAR(200) NULL,
+    Manufacturer     NVARCHAR(200) NULL,
+    HSNCode          NVARCHAR(30) NULL,
+    Category         NVARCHAR(100) NULL,
+    Pack             NVARCHAR(50) NULL,
+    MRP              DECIMAL(10,2) NOT NULL,
+    DiscPercent      DECIMAL(5,2) NOT NULL DEFAULT 0,
+    Rate             DECIMAL(10,2) NOT NULL,
+    Quantity         DECIMAL(10,2) NOT NULL,
+    Amount           DECIMAL(12,2) NOT NULL,
+    CGSTPercent      DECIMAL(5,2) NOT NULL DEFAULT 0,
+    SGSTPercent      DECIMAL(5,2) NOT NULL DEFAULT 0,
+    GSTPercent       DECIMAL(5,2) NOT NULL DEFAULT 0,
+    GSTAmount        DECIMAL(12,2) NOT NULL DEFAULT 0,
+    Total            DECIMAL(12,2) NOT NULL,
+    CONSTRAINT FK_PurchaseOrderItem_Header FOREIGN KEY (PurchaseOrderId) REFERENCES PurchaseOrder(PurchaseOrderId) ON DELETE CASCADE,
+    CONSTRAINT FK_PurchaseOrderItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
+);
+
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='SalesReturn' AND xtype='U')
 CREATE TABLE SalesReturn (
     SalesReturnId INT IDENTITY(1,1) PRIMARY KEY,
@@ -786,6 +857,32 @@ async function init() {
           INSERT INTO UnitMaster (Name) VALUES (@name)
       `);
     }
+
+    // Item Master pick-lists: the Type / Unit values the Pharmacy spec starts
+    // with (matched ignoring case, so 'Nos' covers 'nos'), the standard
+    // potencies, and every category items already use.
+    for (const name of ['nos', 'bottle', 'strip', 'tablet', 'ml', 'gm', 'dram', 'box', 'tube', 'sachet']) {
+      await pool.request().input('name', sql.NVarChar, name).query(`
+        IF NOT EXISTS (SELECT * FROM UnitMaster WHERE LOWER(Name) = LOWER(@name))
+          INSERT INTO UnitMaster (Name) VALUES (@name)
+      `);
+    }
+    for (const [i, name] of ['6C', '30C', '200C', '1M', '10M', 'Q'].entries()) {
+      await pool.request().input('name', sql.NVarChar, name).input('sort', sql.Int, i + 1).query(`
+        IF NOT EXISTS (SELECT * FROM PotencyMaster WHERE LOWER(Name) = LOWER(@name))
+          INSERT INTO PotencyMaster (Name, SortOrder) VALUES (@name, @sort)
+      `);
+    }
+    await pool.request().query(`
+      INSERT INTO CategoryMaster (Name)
+      SELECT DISTINCT LTRIM(RTRIM(i.Category)) FROM PharmacyItem i
+      WHERE i.IsActive = 1 AND LTRIM(RTRIM(ISNULL(i.Category, ''))) <> ''
+        AND NOT EXISTS (SELECT * FROM CategoryMaster c WHERE LOWER(c.Name) = LOWER(LTRIM(RTRIM(i.Category))));
+      INSERT INTO PotencyMaster (Name)
+      SELECT DISTINCT LTRIM(RTRIM(i.Potency)) FROM PharmacyItem i
+      WHERE i.IsActive = 1 AND LTRIM(RTRIM(ISNULL(i.Potency, ''))) <> ''
+        AND NOT EXISTS (SELECT * FROM PotencyMaster p WHERE LOWER(p.Name) = LOWER(LTRIM(RTRIM(i.Potency))));
+    `);
 
     // Seed the default Admin user only if it doesn't already exist.
     const exists = await pool

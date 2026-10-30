@@ -50,11 +50,14 @@
   .btn-ghost {
     @apply btn rounded-lg text-ink-500 hover:bg-ink-100 hover:text-ink-700;
   }
+  /* Compact form boxes: 30px tall. A minimum height (not a fixed one) so
+     textareas still grow; selects and date boxes ignore line height, so the
+     minimum is what lines them up with the text boxes. */
   .input {
-    @apply w-full rounded-lg border border-ink-200 bg-white px-3.5 py-1.5 text-sm text-ink-800 shadow-sm transition-colors placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100/70;
+    @apply min-h-[30px] w-full rounded-lg border border-ink-200 bg-white px-2.5 py-[3px] text-[13px] leading-[22px] text-ink-800 shadow-sm transition-colors placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100/70;
   }
   .label {
-    @apply mb-1.5 block text-sm font-medium text-ink-600;
+    @apply mb-0.5 block text-xs font-medium text-ink-600;
   }
   .card {
     @apply rounded-2xl border border-ink-100 bg-white px-5 pb-5 pt-3 shadow-card transition-shadow sm:px-6 sm:pb-6 sm:pt-3;
@@ -113,3 +116,9 @@
     transform: none !important;
   }
 }
+
+/* Number boxes in editable grids: no spinner arrows (they hide digits in
+   narrow cells, and ↑ / ↓ move between rows there). */
+.no-spin { -moz-appearance: textfield; appearance: textfield; }
+.no-spin::-webkit-inner-spin-button,
+.no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

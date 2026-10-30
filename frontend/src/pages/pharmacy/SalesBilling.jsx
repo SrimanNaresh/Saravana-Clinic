@@ -251,7 +251,7 @@ export default function SalesBilling() {
                       <td className={cell}>
                         <input
                           type="number" step="0.01" min="0" data-r={r} data-c={2}
-                          className={`${box} text-right ${problem?.price ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          className={`${box} no-spin text-right ${problem?.price ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={l.price} disabled={!l.itemId}
                           onChange={(e) => setLine(l.key, { price: e.target.value })}
                         />
@@ -260,7 +260,7 @@ export default function SalesBilling() {
                       <td className={cell}>
                         <input
                           type="number" step="1" min="0" data-r={r} data-c={3}
-                          className={`${box} text-right ${problem?.qty ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          className={`${box} no-spin text-right ${problem?.qty ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={l.qty} disabled={!l.itemId}
                           onChange={(e) => setLine(l.key, { qty: e.target.value })}
                         />

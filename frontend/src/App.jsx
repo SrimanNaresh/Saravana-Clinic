@@ -37,8 +37,11 @@ import VendorMaster from './pages/pharmacy/VendorMaster.jsx';
 import VendorList from './pages/pharmacy/VendorList.jsx';
 import PurchaseMaster from './pages/pharmacy/PurchaseMaster.jsx';
 import PurchaseMasterList from './pages/pharmacy/PurchaseMasterList.jsx';
-import Item from './pages/pharmacy/Item.jsx';
-import ItemList from './pages/pharmacy/ItemList.jsx';
+import ItemMaster from './pages/pharmacy/ItemMaster.jsx';
+import ItemListPage from './pages/pharmacy/ItemListPage.jsx';
+import ItemBulkUpdate from './pages/pharmacy/ItemBulkUpdate.jsx';
+import PurchaseOrder from './pages/pharmacy/PurchaseOrder.jsx';
+import PurchaseOrderList from './pages/pharmacy/PurchaseOrderList.jsx';
 import ItemListNew from './pages/pharmacy/ItemListNew.jsx';
 import Stock from './pages/pharmacy/Stock.jsx';
 import StockInward from './pages/pharmacy/StockInward.jsx';
@@ -169,8 +172,11 @@ function AppLayout({ appName }) {
               <Route path="/billing/month-wise" element={<BillingMonthWise />} />
               <Route path="/billing/custom" element={<BillingCustom />} />
               <Route path="/pharmacy/supplier" element={<Supplier />} />
-              <Route path="/pharmacy/item" element={<Item />} />
-              <Route path="/pharmacy/item-list" element={<ItemList />} />
+              <Route path="/pharmacy/item" element={<ItemMaster />} />
+              <Route path="/pharmacy/item-list" element={<ItemListPage />} />
+              <Route path="/pharmacy/item-bulk-update" element={<ItemBulkUpdate />} />
+              <Route path="/pharmacy/purchase-order" element={<PurchaseOrder />} />
+              <Route path="/pharmacy/purchase-order-list" element={<PurchaseOrderList />} />
               <Route path="/pharmacy/item-list-new" element={<ItemListNew />} />
               <Route path="/pharmacy/stock" element={<Stock />} />
               <Route path="/pharmacy/stock-inward" element={<StockInward />} />

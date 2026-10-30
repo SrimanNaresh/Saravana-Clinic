@@ -32,16 +32,15 @@ export const MENU_GROUPS = [
     items: [
       // Laid out as the Pharmacy spec's parts (Item, Vendor, Purchase / Order,
       // Stock In, Return, Sales, Report), each with Master / List. Keys are
-      // unchanged so existing Menu Access grants still apply. Supplier and
-      // Purchase Invoice stay until Stock In no longer needs a Purchase
-      // Invoice; Sales Return and the old Stock screen are off the menu
-      // (Stock Report replaces Stock) but their routes still work.
+      // unchanged so existing Menu Access grants still apply. Supplier,
+      // Purchase Invoice, Sales Return, the old Stock screen, the old Purchase
+      // Master and Bulk Itemlist are off the menu but their routes still work.
       {
         label: 'Item',
         submenu: [
           { key: 'pharmacy.item', label: 'Master', to: '/pharmacy/item' },
           { key: 'pharmacy.item-list', label: 'List', to: '/pharmacy/item-list' },
-          { key: 'pharmacy.item-list-new', label: 'Bulk Update', to: '/pharmacy/item-list-new' },
+          { key: 'pharmacy.item-list-new', label: 'Bulk Update', to: '/pharmacy/item-bulk-update' },
         ],
       },
       {
@@ -54,11 +53,8 @@ export const MENU_GROUPS = [
       {
         label: 'Purchase / Order',
         submenu: [
-          { key: 'pharmacy.purchase-master', label: 'Master', to: '/pharmacy/purchase-master' },
-          { key: 'pharmacy.purchase-master-list', label: 'List', to: '/pharmacy/purchase-master-list' },
-          { key: 'pharmacy.purchase-invoice', label: 'Invoice', to: '/pharmacy/purchase-invoice' },
-          { key: 'pharmacy.purchase-invoice-list', label: 'Invoice List', to: '/pharmacy/purchase-invoice-list' },
-          { key: 'pharmacy.supplier', label: 'Supplier', to: '/pharmacy/supplier' },
+          { key: 'pharmacy.purchase-master', label: 'Master', to: '/pharmacy/purchase-order' },
+          { key: 'pharmacy.purchase-master-list', label: 'List', to: '/pharmacy/purchase-order-list' },
         ],
       },
       {
