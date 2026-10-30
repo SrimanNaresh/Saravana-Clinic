@@ -21,3 +21,10 @@ export function purchaseLine({ mrp, discPercent, quantity, cgstPercent, sgstPerc
 }
 
 export const purchaseTotal = (lines) => round2(lines.reduce((s, l) => s + purchaseLine(l).total, 0));
+
+// Stock In selling price: Cur.Rate plus Sales %, then less Discount %.
+//   e.g. 90 -> +20 % -> 108 -> -5 % -> 102.60
+export function selAmount({ rate, salesPercent, discPercent }) {
+  const withMargin = round2(num(rate) * (1 + num(salesPercent) / 100));
+  return round2(withMargin * (1 - num(discPercent) / 100));
+}

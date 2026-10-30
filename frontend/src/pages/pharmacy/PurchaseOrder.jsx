@@ -65,7 +65,7 @@ export default function PurchaseOrder() {
   const [orderDate, setOrderDate] = useState(today());
   const [lines, setLines] = useState([emptyLine()]);
   const [showOptional, setShowOptional] = useState(false);
-  const [editing, setEditing] = useState(null); // { id, no }
+  const [editing, setEditing] = useState(null); // { id, no, locked }
   const [saving, setSaving] = useState(false);
   // Inline "+ Add vendor" form: null or { name, address, mobile }.
   const [newVendor, setNewVendor] = useState(null);
@@ -91,7 +91,7 @@ export default function PurchaseOrder() {
     if (!id) return;
     navigate(location.pathname, { replace: true, state: null });
     purchaseOrderApi.get(id).then((o) => {
-      setEditing({ id: o.PurchaseOrderId, no: o.OrderNo });
+      setEditing({ id: o.PurchaseOrderId, no: o.OrderNo, locked: o.locked });
       setVendorId(String(o.VendorId));
       setDetails(o.VendorDetails || '');
       setOrderDate(String(o.OrderDate).slice(0, 10));
@@ -221,6 +221,10 @@ export default function PurchaseOrder() {
               </button>
             }
           />
+
+          {editing?.locked && (
+            <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-800">{editing.locked}</div>
+          )}
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-full sm:w-80">
@@ -387,7 +391,7 @@ export default function PurchaseOrder() {
             <button type="button" className="btn-secondary" onClick={() => (editing ? navigate('/pharmacy/purchase-order-list') : reset())}>
               <X size={16} /> Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={saving}>
+            <button type="submit" className="btn-primary" disabled={saving || !!editing?.locked}>
               <Save size={16} /> {saving ? 'Saving...' : editing ? 'Update' : 'Save'}
             </button>
           </div>

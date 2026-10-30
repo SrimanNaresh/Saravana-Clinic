@@ -9,6 +9,13 @@ import { purchaseLine, round2 } from '../utils/purchaseCalc.js';
 const router = Router();
 
 const ORDER_NO = docNoSql('PO', 'h.PurchaseOrderId');
+
+// Once goods have come in against an order it can't be changed.
+async function receivedLock(request, orderId) {
+  const r = await request.input('lockOrderId', sql.Int, orderId)
+    .query('SELECT COUNT(*) AS n FROM StockIn WHERE PurchaseOrderId = @lockOrderId AND IsActive = 1');
+  return r.recordset[0].n ? 'A Stock In has been made against this order, so it can no longer be changed' : null;
+}
 const MAX_GST = 28;
 
 router.get('/', async (req, res) => {
@@ -43,7 +50,7 @@ router.get('/:id', async (req, res) => {
     if (!head.recordset.length) return res.status(404).json({ error: 'Order not found' });
     const lines = await pool.request().input('id', sql.Int, req.params.id)
       .query('SELECT * FROM PurchaseOrderItem WHERE PurchaseOrderId = @id ORDER BY LineId');
-    res.json({ ...head.recordset[0], lines: lines.recordset });
+    res.json({ ...head.recordset[0], lines: lines.recordset, locked: await receivedLock(pool.request(), Number(req.params.id)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -144,6 +151,10 @@ async function insertLines(tx, orderId, lines) {
 
 async function saveOrder(req, res, orderId) {
   const pool = await getPool();
+  if (orderId) {
+    const locked = await receivedLock(pool.request(), orderId);
+    if (locked) return res.status(400).json({ error: locked });
+  }
   const o = await checkOrder(pool, req.body || {}, orderId);
   if (o.error) return res.status(400).json({ error: o.error });
   const tx = new sql.Transaction(pool);
@@ -190,6 +201,8 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const pool = await getPool();
+    const locked = await receivedLock(pool.request(), Number(req.params.id));
+    if (locked) return res.status(400).json({ error: locked });
     await pool.request().input('id', sql.Int, req.params.id)
       .query('UPDATE PurchaseOrder SET IsActive = 0 WHERE PurchaseOrderId = @id');
     res.json({ success: true });

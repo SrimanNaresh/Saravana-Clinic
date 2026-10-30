@@ -691,6 +691,75 @@ CREATE TABLE PurchaseOrderItem (
     CONSTRAINT FK_PurchaseOrderItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
 );
 
+-- Pharmacy > Stock In: goods received against a Purchase Order, batch by
+-- batch. Adds stock (read from these rows) and sets each item's selling
+-- price to the line's SelAmount. MfgDate is the first and ExpDate the last
+-- day of their month. Number: SC-SI0001 from the id.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockIn' AND xtype='U')
+CREATE TABLE StockIn (
+    StockInId        INT IDENTITY(1,1) PRIMARY KEY,
+    InDate           DATE NOT NULL,
+    VendorId         INT NOT NULL,
+    PurchaseOrderId  INT NOT NULL,
+    CreatedBy        NVARCHAR(100) NULL,
+    IsActive         BIT NOT NULL DEFAULT 1,
+    CreatedAt        DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_StockIn_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId),
+    CONSTRAINT FK_StockIn_Order FOREIGN KEY (PurchaseOrderId) REFERENCES PurchaseOrder(PurchaseOrderId)
+);
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockInItem' AND xtype='U')
+CREATE TABLE StockInItem (
+    LineId        INT IDENTITY(1,1) PRIMARY KEY,
+    StockInId     INT NOT NULL,
+    PoLineId      INT NOT NULL,
+    ItemId        INT NOT NULL,
+    BatchNo       NVARCHAR(50) NOT NULL,
+    MfgDate       DATE NULL,
+    ExpDate       DATE NOT NULL,
+    Quantity      DECIMAL(10,2) NOT NULL,
+    Rate          DECIMAL(10,2) NOT NULL,
+    MRP           DECIMAL(10,2) NOT NULL,
+    SalesPercent  DECIMAL(6,2) NOT NULL DEFAULT 0,
+    DiscPercent   DECIMAL(5,2) NOT NULL DEFAULT 0,
+    SelAmount     DECIMAL(10,2) NOT NULL,
+    CONSTRAINT FK_StockInItem_Header FOREIGN KEY (StockInId) REFERENCES StockIn(StockInId) ON DELETE CASCADE,
+    CONSTRAINT FK_StockInItem_PoLine FOREIGN KEY (PoLineId) REFERENCES PurchaseOrderItem(LineId),
+    CONSTRAINT FK_StockInItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
+);
+
+-- Pharmacy > Return: goods sent back to the vendor from one Stock In.
+-- Lowers stock (read from these rows). Batch and dates are copied from the
+-- Stock In line. Number: SC-RT0001 from the id.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockReturn' AND xtype='U')
+CREATE TABLE StockReturn (
+    StockReturnId  INT IDENTITY(1,1) PRIMARY KEY,
+    ReturnDate     DATE NOT NULL,
+    VendorId       INT NOT NULL,
+    StockInId      INT NOT NULL,
+    TotalAmount    DECIMAL(12,2) NOT NULL DEFAULT 0,
+    CreatedBy      NVARCHAR(100) NULL,
+    IsActive       BIT NOT NULL DEFAULT 1,
+    CreatedAt      DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_StockReturn_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId),
+    CONSTRAINT FK_StockReturn_StockIn FOREIGN KEY (StockInId) REFERENCES StockIn(StockInId)
+);
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockReturnItem' AND xtype='U')
+CREATE TABLE StockReturnItem (
+    LineId          INT IDENTITY(1,1) PRIMARY KEY,
+    StockReturnId   INT NOT NULL,
+    StockInLineId   INT NOT NULL,
+    ItemId          INT NOT NULL,
+    BatchNo         NVARCHAR(50) NOT NULL,
+    MfgDate         DATE NULL,
+    ExpDate         DATE NULL,
+    Rate            DECIMAL(10,2) NOT NULL,
+    Quantity        DECIMAL(10,2) NOT NULL,
+    Amount          DECIMAL(12,2) NOT NULL,
+    CONSTRAINT FK_StockReturnItem_Header FOREIGN KEY (StockReturnId) REFERENCES StockReturn(StockReturnId) ON DELETE CASCADE,
+    CONSTRAINT FK_StockReturnItem_InLine FOREIGN KEY (StockInLineId) REFERENCES StockInItem(LineId),
+    CONSTRAINT FK_StockReturnItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
+);
+
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='SalesReturn' AND xtype='U')
 CREATE TABLE SalesReturn (
     SalesReturnId INT IDENTITY(1,1) PRIMARY KEY,

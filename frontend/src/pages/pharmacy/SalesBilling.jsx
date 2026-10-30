@@ -56,8 +56,9 @@ export default function SalesBilling() {
     setLine(key, { itemId, batches: [], batch: null, price: defaultPrice(item), qty: '1', loading: true });
     try {
       const batches = await salesBillingApi.batches(itemId, editingId || undefined);
-      // The earliest-expiring batch is chosen to start with.
-      setLine(key, { batches, batch: batches[0]?.Batch ?? null, loading: false });
+      // The earliest-expiring batch is chosen to start with, at its Stock In selling price.
+      const first = batches[0];
+      setLine(key, { batches, batch: first?.Batch ?? null, loading: false, ...(first?.SelAmount != null ? { price: String(first.SelAmount) } : {}) });
     } catch {
       show('Failed to load batches for this item', 'error');
       setLine(key, { loading: false });
@@ -237,7 +238,10 @@ export default function SalesBilling() {
                           className={box} data-r={r} data-c={1}
                           disabled={!l.itemId || l.loading || !l.batches.length}
                           value={l.batch ?? ''}
-                          onChange={(e) => setLine(l.key, { batch: e.target.value })}
+                          onChange={(e) => {
+                            const bt = l.batches.find((x) => x.Batch === e.target.value);
+                            setLine(l.key, { batch: e.target.value, ...(bt?.SelAmount != null ? { price: String(bt.SelAmount) } : {}) });
+                          }}
                         >
                           {!l.itemId && <option value="">Pick an item first</option>}
                           {l.itemId && l.loading && <option value="">Loading…</option>}

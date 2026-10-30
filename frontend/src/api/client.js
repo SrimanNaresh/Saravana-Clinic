@@ -224,6 +224,28 @@ export const purchaseOrderApi = {
   remove: (id) => api.delete(`/purchase-orders/${id}`).then((r) => r.data),
 };
 
+export const stockInApi = {
+  list: (search = '') => api.get('/stock-ins', { params: { search } }).then((r) => r.data),
+  get: (id) => api.get(`/stock-ins/${id}`).then((r) => r.data),
+  // A vendor's purchase orders, and an order's lines with Ordered / Received / Due
+  orders: (vendorId) => api.get('/stock-ins/orders', { params: { vendorId } }).then((r) => r.data),
+  orderLines: (orderId, excludeStockInId) => api.get(`/stock-ins/order-lines/${orderId}`, { params: { excludeStockInId } }).then((r) => r.data),
+  create: (data) => api.post('/stock-ins', data).then((r) => r.data),
+  update: (id, data) => api.put(`/stock-ins/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/stock-ins/${id}`).then((r) => r.data),
+};
+
+export const stockReturnApi = {
+  list: (search = '') => api.get('/stock-returns', { params: { search } }).then((r) => r.data),
+  get: (id) => api.get(`/stock-returns/${id}`).then((r) => r.data),
+  // A vendor's Stock Ins, and a Stock In's lines with Received / Returned / Left
+  stockIns: (vendorId) => api.get('/stock-returns/stock-ins', { params: { vendorId } }).then((r) => r.data),
+  stockInLines: (stockInId, excludeReturnId) => api.get(`/stock-returns/stock-in-lines/${stockInId}`, { params: { excludeReturnId } }).then((r) => r.data),
+  create: (data) => api.post('/stock-returns', data).then((r) => r.data),
+  update: (id, data) => api.put(`/stock-returns/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/stock-returns/${id}`).then((r) => r.data),
+};
+
 export const pharmacyReportApi = {
   // params: { search, category, show: 'history' | 'instock' | 'outofstock' | 'all' }
   stock: (params) => api.get('/pharmacy-reports/stock', { params }).then((r) => r.data),

@@ -34,7 +34,8 @@ export const MENU_GROUPS = [
       // Stock In, Return, Sales, Report), each with Master / List. Keys are
       // unchanged so existing Menu Access grants still apply. Supplier,
       // Purchase Invoice, Sales Return, the old Stock screen, the old Purchase
-      // Master and Bulk Itemlist are off the menu but their routes still work.
+      // Master, Bulk Itemlist, Stock Inward and Purchase Return are off the menu
+      // but their routes still work.
       {
         label: 'Item',
         submenu: [
@@ -60,15 +61,15 @@ export const MENU_GROUPS = [
       {
         label: 'Stock In',
         submenu: [
-          { key: 'pharmacy.stock-inward', label: 'Master', to: '/pharmacy/stock-inward' },
-          { key: 'pharmacy.stock-inward-list', label: 'List', to: '/pharmacy/stock-inward-list' },
+          { key: 'pharmacy.stock-inward', label: 'Master', to: '/pharmacy/stock-in' },
+          { key: 'pharmacy.stock-inward-list', label: 'List', to: '/pharmacy/stock-in-list' },
         ],
       },
       {
         label: 'Return',
         submenu: [
-          { key: 'pharmacy.purchase-return', label: 'Master', to: '/pharmacy/purchase-return' },
-          { key: 'pharmacy.purchase-return-list', label: 'List', to: '/pharmacy/purchase-return-list' },
+          { key: 'pharmacy.purchase-return', label: 'Master', to: '/pharmacy/return' },
+          { key: 'pharmacy.purchase-return-list', label: 'List', to: '/pharmacy/return-list' },
         ],
       },
       {

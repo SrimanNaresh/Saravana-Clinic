@@ -80,12 +80,34 @@ router.get('/stock/:itemId/history', async (req, res) => {
   }
 });
 
-// Stock Ins (Stock Inward entries) and Returns per vendor, optionally between
-// ?from and ?to (YYYY-MM-DD, either may be left out).
-// Stock In: Amount = Qty x Cur.Rate less Discount %, GST = GST % of that.
-// Return: its Amount already includes GST, which is split out by its GST %.
+// Stock Ins and Returns per vendor, optionally between ?from and ?to
+// (YYYY-MM-DD, either may be left out).
+// Stock In: Amount = Qty x Cur.Rate, GST from its order line's CGST + SGST %.
+// Return: Amount = Qty x Cur.Rate, GST % of the Stock In line it came from.
+// The older Stock Inward entries and Purchase Returns are included too: an
+// inward's Amount is Qty x price less Discount %; an old return's Amount
+// already includes GST, which is split out by its GST %.
 const DOCS = `
-  SELECT si.VendorId, 'stock-in' AS Type, si.StockInwardId AS DocId, ${docNoSql('SI', 'si.StockInwardId')} AS DocNo,
+  SELECT h.VendorId, 'stock-in' AS Type, h.StockInId AS DocId, ${docNoSql('SI', 'h.StockInId')} AS DocNo,
+         h.InDate AS DocDate, ${docNoSql('PO', 'h.PurchaseOrderId')} AS Against,
+         i.Name AS ItemName, l.Quantity AS Qty, ROUND(l.Quantity * l.Rate, 2) AS Amount,
+         pol.CGSTPercent + pol.SGSTPercent AS GSTPercent
+  FROM StockInItem l
+  JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
+  JOIN PurchaseOrderItem pol ON pol.LineId = l.PoLineId
+  JOIN PharmacyItem i ON i.ItemId = l.ItemId
+  UNION ALL
+  SELECT h.VendorId, 'return', h.StockReturnId, ${docNoSql('RT', 'h.StockReturnId')},
+         h.ReturnDate, ${docNoSql('SI', 'h.StockInId')},
+         i.Name, l.Quantity, ROUND(l.Quantity * l.Rate, 2),
+         pol.CGSTPercent + pol.SGSTPercent
+  FROM StockReturnItem l
+  JOIN StockReturn h ON h.StockReturnId = l.StockReturnId AND h.IsActive = 1
+  JOIN StockInItem sl ON sl.LineId = l.StockInLineId
+  JOIN PurchaseOrderItem pol ON pol.LineId = sl.PoLineId
+  JOIN PharmacyItem i ON i.ItemId = l.ItemId
+  UNION ALL
+  SELECT si.VendorId, 'stock-inward' AS Type, si.StockInwardId AS DocId, ${code6('INW', 'si.StockInwardId')} AS DocNo,
          ISNULL(si.BillDate, CAST(si.CreatedAt AS DATE)) AS DocDate,
          CASE WHEN si.PurchaseInvoiceId IS NULL THEN NULL ELSE ${code6('PINV', 'si.PurchaseInvoiceId')} END AS Against,
          i.Name AS ItemName, si.Quantity AS Qty,
@@ -94,7 +116,7 @@ const DOCS = `
   FROM StockInward si JOIN PharmacyItem i ON i.ItemId = si.ItemId
   WHERE si.IsActive = 1
   UNION ALL
-  SELECT h.VendorId, 'return', h.PurchaseReturnId, ${code6('PRET', 'h.PurchaseReturnId')},
+  SELECT h.VendorId, 'purchase-return', h.PurchaseReturnId, ${code6('PRET', 'h.PurchaseReturnId')},
          h.TransDate,
          CASE WHEN h.PurchaseInvoiceId IS NULL THEN NULL ELSE ${code6('PINV', 'h.PurchaseInvoiceId')} END,
          i.Name, l.Quantity,
@@ -123,12 +145,12 @@ router.get('/vendor-payments', async (req, res) => {
         WHERE (@from IS NULL OR DocDate >= @from) AND (@to IS NULL OR DocDate <= @to)
       )
       SELECT v.VendorId, v.VendorName, v.ContactNo AS MobileNo,
-             COUNT(DISTINCT CASE WHEN D.Type = 'stock-in' THEN D.DocId END) AS StockInCount,
-             SUM(CASE WHEN D.Type = 'stock-in' THEN D.Amount ELSE 0 END) AS StockInAmount,
-             SUM(CASE WHEN D.Type = 'stock-in' THEN D.GST ELSE 0 END) AS StockInGST,
-             SUM(CASE WHEN D.Type = 'stock-in' THEN D.Amount + D.GST ELSE 0 END) AS StockInTotal,
-             COUNT(DISTINCT CASE WHEN D.Type = 'return' THEN D.DocId END) AS ReturnCount,
-             SUM(CASE WHEN D.Type = 'return' THEN D.Amount + D.GST ELSE 0 END) AS ReturnTotal
+             COUNT(DISTINCT CASE WHEN D.Type IN ('stock-in', 'stock-inward') THEN D.Type + CAST(D.DocId AS VARCHAR(10)) END) AS StockInCount,
+             SUM(CASE WHEN D.Type IN ('stock-in', 'stock-inward') THEN D.Amount ELSE 0 END) AS StockInAmount,
+             SUM(CASE WHEN D.Type IN ('stock-in', 'stock-inward') THEN D.GST ELSE 0 END) AS StockInGST,
+             SUM(CASE WHEN D.Type IN ('stock-in', 'stock-inward') THEN D.Amount + D.GST ELSE 0 END) AS StockInTotal,
+             COUNT(DISTINCT CASE WHEN D.Type IN ('return', 'purchase-return') THEN D.Type + CAST(D.DocId AS VARCHAR(10)) END) AS ReturnCount,
+             SUM(CASE WHEN D.Type IN ('return', 'purchase-return') THEN D.Amount + D.GST ELSE 0 END) AS ReturnTotal
       FROM D JOIN Vendor v ON v.VendorId = D.VendorId
       GROUP BY v.VendorId, v.VendorName, v.ContactNo
       ORDER BY v.VendorName

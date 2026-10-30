@@ -42,6 +42,10 @@ import ItemListPage from './pages/pharmacy/ItemListPage.jsx';
 import ItemBulkUpdate from './pages/pharmacy/ItemBulkUpdate.jsx';
 import PurchaseOrder from './pages/pharmacy/PurchaseOrder.jsx';
 import PurchaseOrderList from './pages/pharmacy/PurchaseOrderList.jsx';
+import StockIn from './pages/pharmacy/StockIn.jsx';
+import StockInList from './pages/pharmacy/StockInList.jsx';
+import StockReturnMaster from './pages/pharmacy/StockReturnMaster.jsx';
+import StockReturnList from './pages/pharmacy/StockReturnList.jsx';
 import ItemListNew from './pages/pharmacy/ItemListNew.jsx';
 import Stock from './pages/pharmacy/Stock.jsx';
 import StockInward from './pages/pharmacy/StockInward.jsx';
@@ -175,6 +179,10 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/item-bulk-update" element={<ItemBulkUpdate />} />
               <Route path="/pharmacy/purchase-order" element={<PurchaseOrder />} />
               <Route path="/pharmacy/purchase-order-list" element={<PurchaseOrderList />} />
+              <Route path="/pharmacy/stock-in" element={<StockIn />} />
+              <Route path="/pharmacy/stock-in-list" element={<StockInList />} />
+              <Route path="/pharmacy/return" element={<StockReturnMaster />} />
+              <Route path="/pharmacy/return-list" element={<StockReturnList />} />
               <Route path="/pharmacy/item-list-new" element={<ItemListNew />} />
               <Route path="/pharmacy/stock" element={<Stock />} />
               <Route path="/pharmacy/stock-inward" element={<StockInward />} />

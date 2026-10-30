@@ -20,10 +20,24 @@ export const EVENTS = `
   WHERE (@itemId IS NULL OR l.ItemId = @itemId)
   UNION ALL
   SELECT si.ItemId, 'purchase', si.Quantity, si.CreatedAt, ISNULL(si.BillDate, CAST(si.CreatedAt AS DATE)),
-         'Stock In ' + ${docNoSql('SI', 'si.StockInwardId')} + ISNULL(' · batch ' + si.Batch, ''),
+         'Stock Inward ' + ${code6('INW', 'si.StockInwardId')} + ISNULL(' · batch ' + si.Batch, ''),
          v.VendorName, NULL, 'stock-in', si.StockInwardId
   FROM StockInward si JOIN Vendor v ON v.VendorId = si.VendorId
   WHERE si.IsActive = 1 AND (@itemId IS NULL OR si.ItemId = @itemId)
+  UNION ALL
+  SELECT l.ItemId, 'purchase', l.Quantity, h.CreatedAt, h.InDate,
+         'Stock In ' + ${docNoSql('SI', 'h.StockInId')} + ' · batch ' + l.BatchNo,
+         v.VendorName, h.CreatedBy, 'stock-in', h.StockInId
+  FROM StockInItem l JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
+  JOIN Vendor v ON v.VendorId = h.VendorId
+  WHERE (@itemId IS NULL OR l.ItemId = @itemId)
+  UNION ALL
+  SELECT l.ItemId, 'return', -l.Quantity, h.CreatedAt, h.ReturnDate,
+         'Return ' + ${docNoSql('RT', 'h.StockReturnId')} + ' to vendor · batch ' + l.BatchNo,
+         v.VendorName, h.CreatedBy, 'stock-return', h.StockReturnId
+  FROM StockReturnItem l JOIN StockReturn h ON h.StockReturnId = l.StockReturnId AND h.IsActive = 1
+  JOIN Vendor v ON v.VendorId = h.VendorId
+  WHERE (@itemId IS NULL OR l.ItemId = @itemId)
   UNION ALL
   SELECT l.ItemId, 'return', -l.Quantity, h.CreatedAt, h.TransDate,
          'Return ' + ${code6('PRET', 'h.PurchaseReturnId')} + ' to vendor' + ISNULL(' · batch ' + l.Batch, ''),

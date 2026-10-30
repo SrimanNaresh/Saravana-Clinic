@@ -1,0 +1,247 @@
+import { Router } from 'express';
+import { getPool, sql } from '../db/pool.js';
+import { docNo, docNoSql } from '../utils/docNumber.js';
+import { batchStock } from '../utils/batchStock.js';
+import { selAmount } from '../utils/purchaseCalc.js';
+
+// Pharmacy > Stock In: goods received against a Purchase Order. Saving adds
+// stock (stock is read from these rows, see utils/batchStock.js) and sets each
+// item's selling price to the line's Sel.Amount. A Stock In whose batches a
+// Return or a Sale has used can no longer be edited.
+const router = Router();
+
+const SI_NO = docNoSql('SI', 'h.StockInId');
+const PO_NO = docNoSql('PO', 'po.PurchaseOrderId');
+const pad = (n) => String(n).padStart(2, '0');
+const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+const monthOf = (d) => (d ? new Date(d).toISOString().slice(0, 7) : '');
+const firstDay = (ym) => `${ym}-01`;
+const lastDay = (ym) => { const [y, m] = ym.split('-').map(Number); return `${ym}-${pad(new Date(Date.UTC(y, m, 0)).getUTCDate())}`; };
+const isMonth = (v) => /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+const text = (v) => (v == null ? '' : String(v).trim());
+const numOr = (v, d) => (text(v) === '' ? d : Number(v));
+
+const lockStock = (tx) => new sql.Request(tx).query(
+  "EXEC sp_getapplock @Resource = 'pharmacy-stock', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000",
+);
+
+// A vendor's orders for the Purchase No drop-down.
+router.get('/orders', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('vendorId', sql.Int, Number(req.query.vendorId) || 0).query(`
+      SELECT po.PurchaseOrderId, ${PO_NO} AS OrderNo, po.OrderDate, po.TotalAmount
+      FROM PurchaseOrder po WHERE po.IsActive = 1 AND po.VendorId = @vendorId
+      ORDER BY po.PurchaseOrderId DESC`);
+    res.json(r.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// An order's lines with what's been received by other Stock Ins (the one
+// being edited, ?excludeStockInId=, doesn't count) and what's still due.
+async function orderLines(request, orderId, excludeStockInId) {
+  const r = await request.input('orderId', sql.Int, orderId).input('exclude', sql.Int, excludeStockInId || null).query(`
+    SELECT l.LineId AS PoLineId, l.ItemId, l.ItemName, l.GenericName, l.Manufacturer, l.HSNCode, l.Category, l.Pack,
+           l.MRP, l.Rate, l.Quantity AS Ordered, l.CGSTPercent, l.SGSTPercent,
+           ISNULL((SELECT SUM(si.Quantity) FROM StockInItem si JOIN StockIn h ON h.StockInId = si.StockInId AND h.IsActive = 1
+                   WHERE si.PoLineId = l.LineId AND (@exclude IS NULL OR h.StockInId <> @exclude)), 0) AS Received
+    FROM PurchaseOrderItem l WHERE l.PurchaseOrderId = @orderId ORDER BY l.LineId`);
+  return r.recordset.map((l) => ({ ...l, Ordered: Number(l.Ordered), Received: Number(l.Received), Due: Math.max(0, Number(l.Ordered) - Number(l.Received)) }));
+}
+
+router.get('/order-lines/:orderId', async (req, res) => {
+  try {
+    const pool = await getPool();
+    res.json(await orderLines(pool.request(), Number(req.params.orderId), Number(req.query.excludeStockInId) || null));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Every Stock In line with its header, for the list's Item wise / Date wise views.
+router.get('/', async (req, res) => {
+  try {
+    const { search = '' } = req.query;
+    const pool = await getPool();
+    const r = await pool.request().input('search', sql.NVarChar, `%${search}%`).query(`
+      SELECT h.StockInId, ${SI_NO} AS StockInNo, h.InDate, h.VendorId, v.VendorName, ${PO_NO} AS OrderNo,
+             l.LineId, l.ItemId, i.Name AS ItemName, l.BatchNo, l.MfgDate, l.ExpDate, l.Quantity, l.Rate, l.MRP,
+             l.SalesPercent, l.DiscPercent, l.SelAmount
+      FROM StockIn h
+      JOIN Vendor v ON v.VendorId = h.VendorId
+      JOIN PurchaseOrder po ON po.PurchaseOrderId = h.PurchaseOrderId
+      JOIN StockInItem l ON l.StockInId = h.StockInId
+      JOIN PharmacyItem i ON i.ItemId = l.ItemId
+      WHERE h.IsActive = 1
+        AND (@search = '%%' OR i.Name LIKE @search OR l.BatchNo LIKE @search OR ${SI_NO} LIKE @search OR v.VendorName LIKE @search)
+      ORDER BY h.InDate DESC, h.StockInId DESC, l.LineId`);
+    res.json(r.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Why a Stock In can't be changed any more, or null.
+async function lockReason(request, stockInId) {
+  const r = await request.input('lockId', sql.Int, stockInId).query(`
+    SELECT
+      (SELECT COUNT(*) FROM StockReturnItem ri JOIN StockReturn rh ON rh.StockReturnId = ri.StockReturnId AND rh.IsActive = 1
+        JOIN StockInItem l ON l.LineId = ri.StockInLineId WHERE l.StockInId = @lockId) AS Returns,
+      (SELECT COUNT(*) FROM SalesBillingItem sbi JOIN SalesBilling sb ON sb.SalesBillingId = sbi.SalesBillingId AND sb.IsActive = 1
+        WHERE EXISTS (SELECT 1 FROM StockInItem l WHERE l.StockInId = @lockId AND l.ItemId = sbi.ItemId AND l.BatchNo = sbi.Batch)) AS Sales`);
+  const { Returns, Sales } = r.recordset[0];
+  if (Returns) return 'A Return has been made from this Stock In, so it can no longer be changed';
+  if (Sales) return 'Its batches have been sold, so this Stock In can no longer be changed';
+  return null;
+}
+
+router.get('/:id', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const id = Number(req.params.id);
+    const head = await pool.request().input('id', sql.Int, id).query(`
+      SELECT h.StockInId, ${SI_NO} AS StockInNo, h.InDate, h.VendorId, v.VendorName, h.PurchaseOrderId, ${PO_NO} AS OrderNo
+      FROM StockIn h JOIN Vendor v ON v.VendorId = h.VendorId JOIN PurchaseOrder po ON po.PurchaseOrderId = h.PurchaseOrderId
+      WHERE h.StockInId = @id AND h.IsActive = 1`);
+    if (!head.recordset.length) return res.status(404).json({ error: 'Stock In not found' });
+    const lines = await pool.request().input('id', sql.Int, id).query('SELECT * FROM StockInItem WHERE StockInId = @id ORDER BY LineId');
+    res.json({ ...head.recordset[0], lines: lines.recordset, locked: await lockReason(pool.request(), id) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Checks a Stock In body against its order. Returns { error } or what to save.
+// Rows left at 0 are skipped. On edit, an expiry / mfg month the line already
+// had is kept even if it's now in the past.
+async function checkStockIn(tx, body, stockInId) {
+  const inDate = text(body.inDate).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(inDate) || Number.isNaN(Date.parse(inDate))) return { error: 'Date is required' };
+  const vendorId = Number(body.vendorId);
+  if (!(vendorId > 0)) return { error: 'Vendor Name is required' };
+  const orderId = Number(body.purchaseOrderId);
+  if (!(orderId > 0)) return { error: 'Purchase No is required' };
+  const po = await new sql.Request(tx).input('id', sql.Int, orderId)
+    .query('SELECT VendorId FROM PurchaseOrder WHERE PurchaseOrderId = @id AND IsActive = 1');
+  if (!po.recordset.length) return { error: 'Purchase order not found' };
+  if (po.recordset[0].VendorId !== vendorId) return { error: "That order isn't from this vendor" };
+
+  const due = new Map((await orderLines(new sql.Request(tx), orderId, stockInId)).map((l) => [l.PoLineId, l]));
+  const kept = new Map();
+  if (stockInId) {
+    const r = await new sql.Request(tx).input('id', sql.Int, stockInId).query('SELECT PoLineId, MfgDate, ExpDate FROM StockInItem WHERE StockInId = @id');
+    for (const l of r.recordset) kept.set(l.PoLineId, { mfg: monthOf(l.MfgDate), exp: monthOf(l.ExpDate) });
+  }
+  const now = thisMonth();
+  const lines = [];
+  const raw = Array.isArray(body.lines) ? body.lines : [];
+  for (const l of raw) {
+    const qty = numOr(l.quantity, 0);
+    if (qty === 0) continue;
+    const po = due.get(Number(l.poLineId));
+    if (!po) return { error: "A line isn't on this order" };
+    const name = po.ItemName;
+    if (!(qty > 0)) return { error: `${name}: Quantity must be more than 0` };
+    if (qty > po.Due) return { error: `${name}: only ${po.Due} still due on the order` };
+    const batch = text(l.batchNo);
+    if (!batch) return { error: `${name}: Batch No is required` };
+    if (batch.length > 50) return { error: `${name}: Batch No must be at most 50 characters` };
+    const exp = text(l.expMonth);
+    const mfg = text(l.mfgMonth);
+    if (!isMonth(exp)) return { error: `${name}: Exp.Date (month and year) is required` };
+    if (mfg && !isMonth(mfg)) return { error: `${name}: Mf.Date must be a month and year` };
+    const old = kept.get(po.PoLineId) || {};
+    if (exp < now && exp !== old.exp) return { error: `${name}: Exp.Date can't be a past month` };
+    if (mfg && mfg > now && mfg !== old.mfg) return { error: `${name}: Mf.Date can't be a future month` };
+    if (mfg && exp <= mfg) return { error: `${name}: Exp.Date must be after Mf.Date` };
+    const salesPercent = numOr(l.salesPercent, 0);
+    const discPercent = numOr(l.discPercent, 0);
+    if (!(salesPercent >= 0 && salesPercent <= 1000)) return { error: `${name}: Sales % must be 0 or more` };
+    if (!(discPercent >= 0 && discPercent <= 100)) return { error: `${name}: Discount % must be between 0 and 100` };
+    const rate = Number(po.Rate);
+    const mrp = Number(po.MRP);
+    const sel = selAmount({ rate, salesPercent, discPercent });
+    if (sel > mrp) return { error: `${name}: Sel.Amount ${sel.toFixed(2)} is above MRP ${mrp.toFixed(2)}` };
+    lines.push({ poLineId: po.PoLineId, itemId: po.ItemId, batch, mfg: mfg ? firstDay(mfg) : null, exp: lastDay(exp), qty, rate, mrp, salesPercent, discPercent, sel });
+  }
+  if (!lines.length) return { error: 'Enter a Quantity on at least one line' };
+  return { inDate, vendorId, orderId, lines };
+}
+
+async function saveStockIn(req, res, stockInId) {
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+    await lockStock(tx);
+    if (stockInId) {
+      const exists = await new sql.Request(tx).input('id', sql.Int, stockInId).query('SELECT 1 FROM StockIn WHERE StockInId = @id AND IsActive = 1');
+      if (!exists.recordset.length) { await tx.rollback(); return res.status(404).json({ error: 'Stock In not found' }); }
+      const locked = await lockReason(new sql.Request(tx), stockInId);
+      if (locked) { await tx.rollback(); return res.status(400).json({ error: locked }); }
+    }
+    const s = await checkStockIn(tx, req.body || {}, stockInId);
+    if (s.error) { await tx.rollback(); return res.status(400).json({ error: s.error }); }
+
+    // Batches this Stock In had before the edit, to check none goes below zero after it.
+    const touched = [];
+    let id = stockInId;
+    const head = new sql.Request(tx).input('date', sql.Date, s.inDate).input('vendorId', sql.Int, s.vendorId).input('orderId', sql.Int, s.orderId);
+    if (stockInId) {
+      const before = await new sql.Request(tx).input('id', sql.Int, stockInId).query('SELECT ItemId FROM StockInItem WHERE StockInId = @id');
+      touched.push(...before.recordset.map((r) => r.ItemId));
+      await head.input('id', sql.Int, stockInId).query('UPDATE StockIn SET InDate = @date, VendorId = @vendorId, PurchaseOrderId = @orderId WHERE StockInId = @id');
+      await new sql.Request(tx).input('id', sql.Int, stockInId).query('DELETE FROM StockInItem WHERE StockInId = @id');
+    } else {
+      const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null)
+        .query('INSERT INTO StockIn (InDate, VendorId, PurchaseOrderId, CreatedBy) OUTPUT INSERTED.StockInId VALUES (@date, @vendorId, @orderId, @by)');
+      id = ins.recordset[0].StockInId;
+    }
+    for (const l of s.lines) {
+      await new sql.Request(tx)
+        .input('id', sql.Int, id).input('poLineId', sql.Int, l.poLineId).input('itemId', sql.Int, l.itemId)
+        .input('batch', sql.NVarChar(50), l.batch).input('mfg', sql.Date, l.mfg).input('exp', sql.Date, l.exp)
+        .input('qty', sql.Decimal(10, 2), l.qty).input('rate', sql.Decimal(10, 2), l.rate).input('mrp', sql.Decimal(10, 2), l.mrp)
+        .input('sales', sql.Decimal(6, 2), l.salesPercent).input('disc', sql.Decimal(5, 2), l.discPercent).input('sel', sql.Decimal(10, 2), l.sel)
+        .query(`INSERT INTO StockInItem (StockInId, PoLineId, ItemId, BatchNo, MfgDate, ExpDate, Quantity, Rate, MRP, SalesPercent, DiscPercent, SelAmount)
+                VALUES (@id, @poLineId, @itemId, @batch, @mfg, @exp, @qty, @rate, @mrp, @sales, @disc, @sel)`);
+      // Each item's selling price becomes its Sel.Amount.
+      await new sql.Request(tx).input('itemId', sql.Int, l.itemId).input('sel', sql.Decimal(10, 2), l.sel)
+        .query('UPDATE PharmacyItem SET SellPrice = @sel WHERE ItemId = @itemId');
+      touched.push(l.itemId);
+    }
+    const negative = (await batchStock(new sql.Request(tx), touched)).find((b) => b.AvailableQty < 0);
+    if (negative) {
+      await tx.rollback();
+      return res.status(400).json({ error: `That would take batch ${negative.Batch || '(none)'} below zero stock` });
+    }
+    await tx.commit();
+    res.status(stockInId ? 200 : 201).json({ StockInId: id, StockInNo: docNo('SI', id) });
+  } catch (err) {
+    await tx.rollback().catch(() => {});
+    res.status(500).json({ error: err.message });
+  }
+}
+
+router.post('/', (req, res) => saveStockIn(req, res, null));
+router.put('/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!(id > 0)) return res.status(400).json({ error: 'Bad Stock In id' });
+  return saveStockIn(req, res, id);
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const locked = await lockReason(pool.request(), Number(req.params.id));
+    if (locked) return res.status(400).json({ error: locked });
+    await pool.request().input('id', sql.Int, req.params.id).query('UPDATE StockIn SET IsActive = 0 WHERE StockInId = @id');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;

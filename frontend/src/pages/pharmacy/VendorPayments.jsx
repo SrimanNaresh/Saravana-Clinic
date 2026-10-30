@@ -8,8 +8,12 @@ import { pharmacyReportApi } from '../../api/client.js';
 const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-GB');
 
-// Where a line opens: Stock Ins in the Stock Inward list, Returns in the Return list.
-const DOC_PAGE = { 'stock-in': '/pharmacy/stock-inward-list', return: '/pharmacy/purchase-return-list' };
+// Where a line opens: Stock Ins and Returns in their own lists (older Stock
+// Inward entries and Purchase Returns in theirs).
+const DOC_PAGE = {
+  'stock-in': '/pharmacy/stock-in-list', return: '/pharmacy/return-list',
+  'stock-inward': '/pharmacy/stock-inward-list', 'purchase-return': '/pharmacy/purchase-return-list',
+};
 
 // One vendor's Stock Ins and Returns, shown under its row.
 function VendorDocs({ vendorId, from, to }) {
@@ -38,7 +42,7 @@ function VendorDocs({ vendorId, from, to }) {
       </thead>
       <tbody>
         {rows.map((d) => {
-          const ret = d.Type === 'return';
+          const ret = d.Type === 'return' || d.Type === 'purchase-return';
           const sign = ret ? '−' : '';
           return (
             <tr
