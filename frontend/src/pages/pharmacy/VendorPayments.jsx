@@ -8,12 +8,9 @@ import { pharmacyReportApi } from '../../api/client.js';
 const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-GB');
 
-// Where a line opens: Stock Ins and Returns in their own lists (older Stock
-// Inward entries and Purchase Returns in theirs).
-const DOC_PAGE = {
-  'stock-in': '/pharmacy/stock-in-list', return: '/pharmacy/return-list',
-  'stock-inward': '/pharmacy/stock-inward-list', 'purchase-return': '/pharmacy/purchase-return-list',
-};
+// Where a line opens. Older Stock Inward entries and Purchase Returns have no
+// screen any more, so their lines don't open anything.
+const DOC_PAGE = { 'stock-in': '/pharmacy/stock-in-list', return: '/pharmacy/return-list' };
 
 // One vendor's Stock Ins and Returns, shown under its row.
 function VendorDocs({ vendorId, from, to }) {
@@ -47,9 +44,9 @@ function VendorDocs({ vendorId, from, to }) {
           return (
             <tr
               key={`${d.Type}-${d.DocId}`}
-              className="cursor-pointer border-t border-ink-100 hover:bg-white"
-              title="Open this document's list"
-              onClick={() => navigate(DOC_PAGE[d.Type], { state: { search: d.DocNo } })}
+              className={`border-t border-ink-100 ${DOC_PAGE[d.Type] ? 'cursor-pointer hover:bg-white' : ''}`}
+              title={DOC_PAGE[d.Type] ? "Open this document's list" : ''}
+              onClick={() => DOC_PAGE[d.Type] && navigate(DOC_PAGE[d.Type], { state: { search: d.DocNo } })}
             >
               <td className="whitespace-nowrap px-2 py-1">{dateLabel(d.DocDate)}</td>
               <td className="px-2 py-1">

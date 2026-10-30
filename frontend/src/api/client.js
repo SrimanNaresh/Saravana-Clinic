@@ -111,65 +111,11 @@ export const pharmacyApi = {
   remove: (id) => api.delete(`/pharmacy/${id}`).then((r) => r.data),
 };
 
-export const supplierApi = {
-  list: (search = '') => api.get('/suppliers', { params: { search } }).then((r) => r.data),
-  create: (data) => api.post('/suppliers', data).then((r) => r.data),
-  update: (id, data) => api.put(`/suppliers/${id}`, data).then((r) => r.data),
-  remove: (id) => api.delete(`/suppliers/${id}`).then((r) => r.data),
-};
-
 export const vendorApi = {
   list: (search = '') => api.get('/vendors', { params: { search } }).then((r) => r.data),
   create: (data) => api.post('/vendors', data).then((r) => r.data),
   update: (id, data) => api.put(`/vendors/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/vendors/${id}`).then((r) => r.data),
-};
-
-export const purchaseMasterApi = {
-  list: (search = '') => api.get('/purchase-masters', { params: { search } }).then((r) => r.data),
-  create: (data) => api.post('/purchase-masters', data).then((r) => r.data),
-  update: (id, data) => api.put(`/purchase-masters/${id}`, data).then((r) => r.data),
-  bulk: (rows) => api.post('/purchase-masters/bulk', { rows }).then((r) => r.data),
-  createMany: (vendorId, lines) => api.post('/purchase-masters/multi', { vendorId, lines }).then((r) => r.data),
-  // Renames (or, with a blank `to`, clears) a Qty / price / GST / discount value on every entry using it.
-  replaceValue: (field, from, to) => api.post('/purchase-masters/replace-value', { field, from, to }).then((r) => r.data),
-  remove: (id) => api.delete(`/purchase-masters/${id}`).then((r) => r.data),
-};
-
-export const stockInwardApi = {
-  list: (search = '') => api.get('/stock-inwards', { params: { search } }).then((r) => r.data),
-  create: (data) => api.post('/stock-inwards', data).then((r) => r.data),
-  update: (id, data) => api.put(`/stock-inwards/${id}`, data).then((r) => r.data),
-  bulk: (rows) => api.post('/stock-inwards/bulk', { rows }).then((r) => r.data),
-  remove: (id) => api.delete(`/stock-inwards/${id}`).then((r) => r.data),
-};
-
-export const genericNameApi = {
-  list: (search = '') => api.get('/generic-names', { params: { search } }).then((r) => r.data),
-  create: (data) => api.post('/generic-names', data).then((r) => r.data),
-  update: (id, data) => api.put(`/generic-names/${id}`, data).then((r) => r.data),
-  remove: (id) => api.delete(`/generic-names/${id}`).then((r) => r.data),
-};
-
-export const manufacturerApi = {
-  list: (search = '') => api.get('/manufacturers', { params: { search } }).then((r) => r.data),
-  create: (data) => api.post('/manufacturers', data).then((r) => r.data),
-  update: (id, data) => api.put(`/manufacturers/${id}`, data).then((r) => r.data),
-  remove: (id) => api.delete(`/manufacturers/${id}`).then((r) => r.data),
-};
-
-export const itemTypeApi = {
-  list: (search = '') => api.get('/item-types', { params: { search } }).then((r) => r.data),
-  create: (data) => api.post('/item-types', data).then((r) => r.data),
-  update: (id, data) => api.put(`/item-types/${id}`, data).then((r) => r.data),
-  remove: (id) => api.delete(`/item-types/${id}`).then((r) => r.data),
-};
-
-export const unitApi = {
-  list: (search = '') => api.get('/units', { params: { search } }).then((r) => r.data),
-  create: (data) => api.post('/units', data).then((r) => r.data),
-  update: (id, data) => api.put(`/units/${id}`, data).then((r) => r.data),
-  remove: (id) => api.delete(`/units/${id}`).then((r) => r.data),
 };
 
 export const pharmacyItemApi = {
@@ -182,11 +128,6 @@ export const pharmacyItemApi = {
   replaceValue: (field, from, to) => api.post('/pharmacy-items/replace-value', { field, from, to }).then((r) => r.data),
   remove: (id) => api.delete(`/pharmacy-items/${id}`).then((r) => r.data),
   bulk: (rows) => api.post('/pharmacy-items/bulk', { rows }).then((r) => r.data),
-};
-
-export const pharmacyStockApi = {
-  list: (search = '') => api.get('/pharmacy-stock', { params: { search } }).then((r) => r.data),
-  batches: (itemId) => api.get(`/pharmacy-stock/${itemId}/batches`).then((r) => r.data),
 };
 
 // Purchase Invoice/Return and Sales Billing/Return share this exact shape
@@ -254,15 +195,12 @@ export const pharmacyReportApi = {
   vendorPayments: (params) => api.get('/pharmacy-reports/vendor-payments', { params }).then((r) => r.data),
   vendorDocs: (vendorId, params) => api.get(`/pharmacy-reports/vendor-payments/${vendorId}`, { params }).then((r) => r.data),
 };
-export const purchaseInvoiceApi = transactionApi('purchase-invoices');
-export const purchaseReturnApi = transactionApi('purchase-returns');
 export const salesBillingApi = {
   ...transactionApi('sales-billings'),
   get: (id) => api.get(`/sales-billings/${id}`).then((r) => r.data),
   // An item's batches with stock left; excludeSaleId adds back that sale's own quantities.
   batches: (itemId, excludeSaleId) => api.get(`/sales-billings/batches/${itemId}`, { params: { excludeSaleId } }).then((r) => r.data),
 };
-export const salesReturnApi = transactionApi('sales-returns');
 
 export const reportApi = {
   patients: (from, to) => api.get('/reports/patients', { params: from && to ? { from, to } : {} }).then((r) => r.data),

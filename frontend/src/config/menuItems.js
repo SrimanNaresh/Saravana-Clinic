@@ -30,12 +30,9 @@ export const MENU_GROUPS = [
   {
     group: 'Pharmacy',
     items: [
-      // Laid out as the Pharmacy spec's parts (Item, Vendor, Purchase / Order,
+      // Exactly the Pharmacy spec's parts (Item, Vendor, Purchase / Order,
       // Stock In, Return, Sales, Report), each with Master / List. Keys are
-      // unchanged so existing Menu Access grants still apply. Supplier,
-      // Purchase Invoice, Sales Return, the old Stock screen, the old Purchase
-      // Master, Bulk Itemlist, Stock Inward and Purchase Return are off the menu
-      // but their routes still work.
+      // kept from the older screens so existing Menu Access grants still apply.
       {
         label: 'Item',
         submenu: [

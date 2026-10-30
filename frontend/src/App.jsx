@@ -32,11 +32,8 @@ import ReportPatientList from './pages/reports/ReportPatientList.jsx';
 import ReportMedicalHistory from './pages/reports/ReportMedicalHistory.jsx';
 import ReportPrescriptions from './pages/reports/ReportPrescriptions.jsx';
 import ReportVisitList from './pages/reports/ReportVisitList.jsx';
-import Supplier from './pages/pharmacy/Supplier.jsx';
 import VendorMaster from './pages/pharmacy/VendorMaster.jsx';
 import VendorList from './pages/pharmacy/VendorList.jsx';
-import PurchaseMaster from './pages/pharmacy/PurchaseMaster.jsx';
-import PurchaseMasterList from './pages/pharmacy/PurchaseMasterList.jsx';
 import ItemMaster from './pages/pharmacy/ItemMaster.jsx';
 import ItemListPage from './pages/pharmacy/ItemListPage.jsx';
 import ItemBulkUpdate from './pages/pharmacy/ItemBulkUpdate.jsx';
@@ -46,17 +43,8 @@ import StockIn from './pages/pharmacy/StockIn.jsx';
 import StockInList from './pages/pharmacy/StockInList.jsx';
 import StockReturnMaster from './pages/pharmacy/StockReturnMaster.jsx';
 import StockReturnList from './pages/pharmacy/StockReturnList.jsx';
-import ItemListNew from './pages/pharmacy/ItemListNew.jsx';
-import Stock from './pages/pharmacy/Stock.jsx';
-import StockInward from './pages/pharmacy/StockInward.jsx';
-import StockInwardList from './pages/pharmacy/StockInwardList.jsx';
-import PurchaseInvoice from './pages/pharmacy/PurchaseInvoice.jsx';
-import PurchaseInvoiceList from './pages/pharmacy/PurchaseInvoiceList.jsx';
-import PurchaseReturn from './pages/pharmacy/PurchaseReturn.jsx';
-import PurchaseReturnList from './pages/pharmacy/PurchaseReturnList.jsx';
 import SalesBilling from './pages/pharmacy/SalesBilling.jsx';
 import SalesBillingList from './pages/pharmacy/SalesBillingList.jsx';
-import SalesReturn from './pages/pharmacy/SalesReturn.jsx';
 import StockReport from './pages/pharmacy/StockReport.jsx';
 import VendorPayments from './pages/pharmacy/VendorPayments.jsx';
 import PatientRecords from './pages/reports/PatientRecords.jsx';
@@ -173,7 +161,6 @@ function AppLayout({ appName }) {
               <Route path="/billing/patient-bill" element={<BillingPatientBill />} />
               <Route path="/billing/month-wise" element={<BillingMonthWise />} />
               <Route path="/billing/custom" element={<BillingCustom />} />
-              <Route path="/pharmacy/supplier" element={<Supplier />} />
               <Route path="/pharmacy/item" element={<ItemMaster />} />
               <Route path="/pharmacy/item-list" element={<ItemListPage />} />
               <Route path="/pharmacy/item-bulk-update" element={<ItemBulkUpdate />} />
@@ -183,21 +170,10 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/stock-in-list" element={<StockInList />} />
               <Route path="/pharmacy/return" element={<StockReturnMaster />} />
               <Route path="/pharmacy/return-list" element={<StockReturnList />} />
-              <Route path="/pharmacy/item-list-new" element={<ItemListNew />} />
-              <Route path="/pharmacy/stock" element={<Stock />} />
-              <Route path="/pharmacy/stock-inward" element={<StockInward />} />
-              <Route path="/pharmacy/stock-inward-list" element={<StockInwardList />} />
               <Route path="/pharmacy/vendor-master" element={<VendorMaster />} />
               <Route path="/pharmacy/vendor-list" element={<VendorList />} />
-              <Route path="/pharmacy/purchase-master" element={<PurchaseMaster />} />
-              <Route path="/pharmacy/purchase-master-list" element={<PurchaseMasterList />} />
-              <Route path="/pharmacy/purchase-invoice" element={<PurchaseInvoice />} />
-              <Route path="/pharmacy/purchase-invoice-list" element={<PurchaseInvoiceList />} />
-              <Route path="/pharmacy/purchase-return" element={<PurchaseReturn />} />
-              <Route path="/pharmacy/purchase-return-list" element={<PurchaseReturnList />} />
               <Route path="/pharmacy/sales-billing" element={<SalesBilling />} />
               <Route path="/pharmacy/sales-billing-list" element={<SalesBillingList />} />
-              <Route path="/pharmacy/sales-return" element={<SalesReturn />} />
               <Route path="/pharmacy/stock-report" element={<StockReport />} />
               <Route path="/pharmacy/vendor-payments" element={<VendorPayments />} />
             </Routes>
