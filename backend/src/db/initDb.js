@@ -273,6 +273,18 @@ CREATE TABLE Vendor (
     CreatedAt      DATETIME NOT NULL DEFAULT GETDATE()
 );
 
+-- Vendor Master's address block and second drug licence. Status is the
+-- Active / Inactive choice on the form; IsActive stays the soft-delete flag.
+-- ContactNo is the Mobile No and AlternateNo the Phone No on the form.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='State' AND Object_ID=Object_ID('Vendor'))
+    ALTER TABLE Vendor ADD State NVARCHAR(60) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Pincode' AND Object_ID=Object_ID('Vendor'))
+    ALTER TABLE Vendor ADD Pincode NVARCHAR(6) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DLNo2' AND Object_ID=Object_ID('Vendor'))
+    ALTER TABLE Vendor ADD DLNo2 NVARCHAR(50) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Status' AND Object_ID=Object_ID('Vendor'))
+    ALTER TABLE Vendor ADD Status NVARCHAR(10) NOT NULL DEFAULT 'Active';
+
 -- Pharmacy Item's Generic Name and Manufacturer, promoted from free text to
 -- their own small master lists (same pattern as Supplier) so they're
 -- selected from a fixed, reusable set instead of being retyped per item.
@@ -582,6 +594,31 @@ IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Batch' AND Object_ID=Object
     ALTER TABLE SalesBillingItem ADD Batch NVARCHAR(100) NULL;
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='ExpiryDate' AND Object_ID=Object_ID('SalesBillingItem'))
     ALTER TABLE SalesBillingItem ADD ExpiryDate DATE NULL;
+
+-- Sales (counter sale): the customer's mobile and who saved the bill.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='MobileNo' AND Object_ID=Object_ID('SalesBilling'))
+    ALTER TABLE SalesBilling ADD MobileNo NVARCHAR(20) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='CreatedBy' AND Object_ID=Object_ID('SalesBilling'))
+    ALTER TABLE SalesBilling ADD CreatedBy NVARCHAR(100) NULL;
+
+-- Stock changes that have no document of their own: an item's opening stock
+-- and quantity adjustments. Purchases, returns and sales are read from their
+-- own tables, so the Stock Report's history is this table plus those.
+-- Reason: 'opening' | 'adjustment'.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockMovement' AND xtype='U')
+CREATE TABLE StockMovement (
+    MovementId  INT IDENTITY(1,1) PRIMARY KEY,
+    ItemId      INT NOT NULL,
+    QtyChange   DECIMAL(10,2) NOT NULL,
+    Reason      NVARCHAR(20) NOT NULL,
+    RefType     NVARCHAR(30) NULL,
+    RefId       INT NULL,
+    VendorId    INT NULL,
+    Note        NVARCHAR(300) NULL,
+    CreatedBy   NVARCHAR(100) NULL,
+    CreatedAt   DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_StockMovement_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
+);
 
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='SalesReturn' AND xtype='U')
 CREATE TABLE SalesReturn (

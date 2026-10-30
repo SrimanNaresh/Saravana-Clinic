@@ -201,9 +201,22 @@ function transactionApi(basePath) {
     remove: (id) => api.delete(`/${basePath}/${id}`).then((r) => r.data),
   };
 }
+export const pharmacyReportApi = {
+  // params: { search, category, show: 'history' | 'instock' | 'outofstock' | 'all' }
+  stock: (params) => api.get('/pharmacy-reports/stock', { params }).then((r) => r.data),
+  history: (itemId) => api.get(`/pharmacy-reports/stock/${itemId}/history`).then((r) => r.data),
+  // params: { from, to } as YYYY-MM-DD; either may be blank
+  vendorPayments: (params) => api.get('/pharmacy-reports/vendor-payments', { params }).then((r) => r.data),
+  vendorDocs: (vendorId, params) => api.get(`/pharmacy-reports/vendor-payments/${vendorId}`, { params }).then((r) => r.data),
+};
 export const purchaseInvoiceApi = transactionApi('purchase-invoices');
 export const purchaseReturnApi = transactionApi('purchase-returns');
-export const salesBillingApi = transactionApi('sales-billings');
+export const salesBillingApi = {
+  ...transactionApi('sales-billings'),
+  get: (id) => api.get(`/sales-billings/${id}`).then((r) => r.data),
+  // An item's batches with stock left; excludeSaleId adds back that sale's own quantities.
+  batches: (itemId, excludeSaleId) => api.get(`/sales-billings/batches/${itemId}`, { params: { excludeSaleId } }).then((r) => r.data),
+};
 export const salesReturnApi = transactionApi('sales-returns');
 
 export const reportApi = {

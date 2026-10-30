@@ -1,28 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Receipt, Plus, Trash2, Save, X, List, Printer, ArrowRight } from 'lucide-react';
-import { CardHeader, Spinner, Toast, Modal } from '../../components/ui.jsx';
+import { Receipt, Plus, Trash2, Save, X, List, Printer } from 'lucide-react';
+import { CardHeader, Toast } from '../../components/ui.jsx';
 import SalesBillReceipt from './SalesBillReceipt.jsx';
-import SearchSelect from '../../components/SearchSelect.jsx';
+import SearchPick from '../../components/grid/SearchPick.jsx';
+import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
-import { pharmacyItemApi, pharmacyStockApi, salesBillingApi, clinicApi } from '../../api/client.js';
+import { pharmacyItemApi, salesBillingApi, clinicApi } from '../../api/client.js';
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const today = () => new Date().toISOString().slice(0, 10);
+const money = (n) => (Number(n) || 0).toFixed(2);
+const round2 = (n) => Math.round(n * 100) / 100;
+const expLabel = (iso) => (iso ? `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : 'No expiry');
+const batchLabel = (b) => `${b.Batch || 'No batch'} · Exp ${expLabel(b.ExpiryDate)} · ${b.AvailableQty}`;
 
-function formatExpiry(iso) {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
-}
-const emptyLine = () => ({
-  key: Math.random(), itemId: '', batchIndex: '', batches: [], loadingBatches: false,
-  batch: null, expiryDate: null, availableQty: 0, qty: '1', rate: '',
-});
+let nextKey = 1;
+const emptyLine = () => ({ key: nextKey++, itemId: '', batches: [], batch: null, qty: '', price: '', loading: false });
 
-// Sales Billing is batch-aware: picking an item loads its available batches
-// (purchased minus already returned/sold, from Stock's batch ledger) so the
-// line is sold from a specific batch — picking a batch auto-fills Expiry,
-// and Rate comes from the item's catalog Sell Price.
+// Pharmacy > Sales > Master: a counter sale. Each line is sold from one batch
+// (only batches with stock left, earliest expiry first); the server re-checks
+// every quantity, price and total.
 export default function SalesBilling() {
   const { toast, show } = useToast();
   const location = useLocation();
@@ -30,102 +28,98 @@ export default function SalesBilling() {
   const [catalog, setCatalog] = useState([]);
   const [transDate, setTransDate] = useState(today());
   const [customerName, setCustomerName] = useState('');
+  const [mobileNo, setMobileNo] = useState('');
   const [lines, setLines] = useState([emptyLine()]);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [clinic, setClinic] = useState(null);
+  // The bill just saved, offered for printing above the form.
   const [printBill, setPrintBill] = useState(null);
 
-  useEffect(() => { pharmacyItemApi.list().then(setCatalog).catch(() => setCatalog([])); }, []);
+  useEffect(() => { pharmacyItemApi.list().then(setCatalog).catch(() => show('Failed to load items', 'error')); }, [show]);
   useEffect(() => { clinicApi.get().then(setClinic).catch(() => setClinic(null)); }, []);
 
-  // The saved bill's printable receipt is already in the DOM (hidden, see
-  // below) by the time this fires, so print immediately reflects it.
-  const printReceipt = () => window.print();
+  const itemById = useMemo(() => new Map(catalog.map((i) => [String(i.ItemId), i])), [catalog]);
+  const itemOptions = useMemo(() => catalog.map((i) => ({ value: String(i.ItemId), label: i.Name })), [catalog]);
 
-  const itemOptions = catalog.map((it) => ({ value: String(it.ItemId), label: it.Name }));
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  const addLine = () => setLines((ls) => [...ls, emptyLine()]);
-  const removeLine = (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : ls));
+  const addLineAfter = (key) => setLines((ls) => {
+    const i = ls.findIndex((l) => l.key === key);
+    return [...ls.slice(0, i + 1), emptyLine(), ...ls.slice(i + 1)];
+  });
+  const removeLine = (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : [emptyLine()]));
 
-  const onPickItem = async (key, itemIdStr) => {
-    const it = catalog.find((i) => String(i.ItemId) === itemIdStr);
-    setLine(key, {
-      itemId: itemIdStr, rate: it?.SellPrice ?? '',
-      batchIndex: '', batch: null, expiryDate: null, availableQty: 0,
-      batches: [], loadingBatches: true,
-    });
+  const defaultPrice = (item) => item?.SellPrice ?? item?.MRP ?? '';
+
+  const pickItem = async (key, itemId) => {
+    const item = itemById.get(itemId);
+    setLine(key, { itemId, batches: [], batch: null, price: defaultPrice(item), qty: '1', loading: true });
     try {
-      const batches = await pharmacyStockApi.batches(itemIdStr);
-      setLine(key, { batches: batches.filter((b) => b.AvailableQty > 0), loadingBatches: false });
+      const batches = await salesBillingApi.batches(itemId, editingId || undefined);
+      // The earliest-expiring batch is chosen to start with.
+      setLine(key, { batches, batch: batches[0]?.Batch ?? null, loading: false });
     } catch {
       show('Failed to load batches for this item', 'error');
-      setLine(key, { loadingBatches: false });
+      setLine(key, { loading: false });
     }
   };
 
-  const onPickBatch = (key, idx, batches) => {
-    const b = batches[Number(idx)];
-    setLine(key, {
-      batchIndex: idx,
-      batch: b?.Batch ?? null,
-      expiryDate: b?.ExpiryDate ?? null,
-      availableQty: b?.AvailableQty ?? 0,
-    });
+  // Stock of each line's batch, and how much all lines together take from it.
+  const batchOfLine = (l) => l.batches.find((b) => b.Batch === l.batch);
+  const used = new Map();
+  for (const l of lines) {
+    if (l.itemId && l.batch != null) {
+      const k = `${l.itemId}|${l.batch}`;
+      used.set(k, (used.get(k) || 0) + (Number(l.qty) || 0));
+    }
+  }
+  const problemOf = (l) => {
+    if (!l.itemId) return null;
+    const b = batchOfLine(l);
+    if (!b) return { qty: 'No stock' };
+    if (used.get(`${l.itemId}|${l.batch}`) > b.AvailableQty) return { qty: `Only ${b.AvailableQty} in stock` };
+    const mrp = Number(itemById.get(l.itemId)?.MRP);
+    if (mrp > 0 && Number(l.price) > mrp) return { price: `Above MRP ${money(mrp)}` };
+    return null;
   };
-
-  const total = lines.reduce((sum, l) => sum + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
+  const filled = lines.filter((l) => l.itemId);
+  const hasProblem = filled.some((l) => problemOf(l) || !(Number(l.qty) > 0) || !(Number(l.price) > 0));
+  const total = round2(filled.reduce((s, l) => s + round2((Number(l.qty) || 0) * (Number(l.price) || 0)), 0));
 
   const resetForm = () => {
     setEditingId(null);
     setLines([emptyLine()]);
     setCustomerName('');
+    setMobileNo('');
     setTransDate(today());
   };
 
-  // Loads a saved sale back into the form for editing. Each line's batch list
-  // is re-fetched (current availability), then that line's own saved quantity
-  // is added back onto its matching batch — the batch's live AvailableQty
-  // already has this sale's quantity deducted, so without adding it back the
-  // edit form would under-report how much room is actually left to use.
-  const startEdit = async (row) => {
+  // A sale opened from the list: its lines get their batch lists with this
+  // sale's own quantities counted as still available.
+  const startEdit = async (id) => {
     try {
-      const items = await salesBillingApi.items(row.SalesBillingId);
-      const builtLines = await Promise.all(items.map(async (it) => {
-        const itemIdStr = String(it.ItemId);
+      const sale = await salesBillingApi.get(id);
+      const built = await Promise.all(sale.lines.map(async (l) => {
         let batches = [];
-        try {
-          batches = await pharmacyStockApi.batches(itemIdStr);
-        } catch { /* leave empty, line stays editable with no batch options */ }
-        batches = batches.map((b) => ((b.Batch || null) === (it.Batch || null)
-          ? { ...b, AvailableQty: b.AvailableQty + Number(it.Quantity) }
-          : b));
-        if (!batches.some((b) => (b.Batch || null) === (it.Batch || null))) {
-          batches = [...batches, { Batch: it.Batch, ExpiryDate: it.ExpiryDate, AvailableQty: Number(it.Quantity) }];
-        }
-        const batchIdx = batches.findIndex((b) => (b.Batch || null) === (it.Batch || null));
-        const chosen = batches[batchIdx];
-        return {
-          key: Math.random(), itemId: itemIdStr, batches, loadingBatches: false,
-          batchIndex: String(batchIdx), batch: chosen?.Batch ?? null, expiryDate: chosen?.ExpiryDate ?? null,
-          availableQty: chosen?.AvailableQty ?? 0, qty: String(it.Quantity), rate: it.Rate,
-        };
+        try { batches = await salesBillingApi.batches(l.ItemId, id); } catch { /* keeps the saved batch only */ }
+        const batch = l.Batch || '';
+        if (!batches.some((b) => b.Batch === batch)) batches = [...batches, { Batch: batch, ExpiryDate: l.ExpiryDate, AvailableQty: 0 }];
+        return { ...emptyLine(), itemId: String(l.ItemId), batches, batch, qty: String(Number(l.Quantity)), price: String(Number(l.Rate)) };
       }));
-      setEditingId(row.SalesBillingId);
-      setCustomerName(row.CustomerName || '');
-      setTransDate(new Date(row.TransDate).toISOString().slice(0, 10));
-      setLines(builtLines.length ? builtLines : [emptyLine()]);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setEditingId(id);
+      setTransDate(String(sale.TransDate).slice(0, 10));
+      setCustomerName(sale.CustomerName || '');
+      setMobileNo(sale.MobileNo || '');
+      setLines(built.length ? built : [emptyLine()]);
     } catch {
       show('Failed to load sale for editing', 'error');
     }
   };
 
-  // The List page hands off a row to edit via navigation state; load it once,
-  // then clear the state so a later refresh of this page starts blank again.
   useEffect(() => {
-    if (location.state?.editSale) {
-      startEdit(location.state.editSale);
+    const id = location.state?.editSale?.SalesBillingId;
+    if (id) {
+      startEdit(id);
       navigate(location.pathname, { replace: true, state: null });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,42 +127,30 @@ export default function SalesBilling() {
 
   const save = async (e) => {
     e.preventDefault();
-    const validLines = lines.filter((l) => l.itemId && l.batchIndex !== '' && Number(l.qty) > 0);
-    if (validLines.length === 0) return show('Add at least one item with a batch and quantity', 'error');
+    if (!transDate) return show('Date is required', 'error');
+    if (!customerName.trim()) return show('Customer Name is required', 'error');
+    if (mobileNo && !/^\+?[0-9][0-9\s-]*$/.test(mobileNo.trim())) return show('Mobile No must contain numbers only', 'error');
+    if (!filled.length) return show('Add at least one item', 'error');
+    if (hasProblem) return show('Fix the rows marked in red first', 'error');
     setSaving(true);
     try {
       const payload = {
-        transDate,
-        customerName,
-        items: validLines.map((l) => ({
-          itemId: Number(l.itemId),
-          quantity: Number(l.qty),
-          rate: Number(l.rate) || 0,
-          amount: (Number(l.qty) || 0) * (Number(l.rate) || 0),
-          batch: l.batch,
-          expiryDate: l.expiryDate,
-        })),
+        transDate, customerName, mobileNo,
+        items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, quantity: Number(l.qty), rate: Number(l.price) })),
       };
       if (editingId) {
         await salesBillingApi.update(editingId, payload);
-        show('Updated', 'success');
-        resetForm();
-        // Editing is initiated from the List page — return there to see the result.
-        navigate('/pharmacy/sales-billing-list');
+        navigate('/pharmacy/sales-billing-list', { state: { flash: 'Sale updated' } });
       } else {
-        const created = await salesBillingApi.create(payload);
-        show('Saved', 'success');
-        // Code is computed the same way the backend does elsewhere (prefix +
-        // 6-digit id) — the create response only returns the new id.
+        const saved = await salesBillingApi.create(payload);
+        show(`Saved ${saved.Code}`, 'success');
         setPrintBill({
-          code: `SALE${String(created.SalesBillingId).padStart(6, '0')}`,
-          transDate, customerName,
-          lines: validLines.map((l) => ({
-            itemName: catalog.find((i) => String(i.ItemId) === l.itemId)?.Name || '',
-            batch: l.batch, qty: Number(l.qty), rate: Number(l.rate) || 0,
-            amount: (Number(l.qty) || 0) * (Number(l.rate) || 0),
+          code: saved.Code, transDate, customerName,
+          lines: filled.map((l) => ({
+            itemName: itemById.get(l.itemId)?.Name || '', batch: l.batch,
+            qty: Number(l.qty), rate: Number(l.price), amount: round2(Number(l.qty) * Number(l.price)),
           })),
-          total,
+          total: Number(saved.TotalAmount),
         });
         resetForm();
       }
@@ -179,14 +161,17 @@ export default function SalesBilling() {
     }
   };
 
+  const cell = 'border border-ink-200 px-1.5 py-1';
+  const box = 'w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-sm focus:border-brand-400 focus:bg-white focus:outline-none';
+
   return (
     <div>
       <div className="card no-print">
         <form onSubmit={save}>
           <CardHeader
             icon={Receipt}
-            title={editingId ? 'Edit Sales Billing' : 'Sales Billing'}
-            subtitle={editingId ? 'Update this saved sale' : 'Bill stock sold over the counter, from a specific batch'}
+            title={editingId ? 'Edit Sale' : 'Sales'}
+            subtitle={editingId ? 'Update this sale' : 'Counter sale from a batch'}
             actions={
               <button type="button" className="btn-secondary" onClick={() => navigate('/pharmacy/sales-billing-list')}>
                 <List size={16} /> View List
@@ -194,121 +179,123 @@ export default function SalesBilling() {
             }
           />
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {printBill && (
+            <div className="mb-2 flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm">
+              <span>Saved <b>{printBill.code}</b> · {printBill.customerName} · ₹{money(printBill.total)}</span>
+              <button type="button" className="btn-secondary py-1" onClick={() => window.print()}><Printer size={14} /> Print</button>
+              <button type="button" className="ml-auto text-ink-400 hover:text-ink-600" title="Close" onClick={() => setPrintBill(null)}><X size={16} /></button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <div>
-              <label className="label">Date</label>
+              <label className="label">Date *</label>
               <input type="date" className="input" value={transDate} onChange={(e) => setTransDate(e.target.value)} />
             </div>
             <div className="lg:col-span-2">
-              <label className="label">Customer Name</label>
-              <input className="input" placeholder="Walk-in / optional" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+              <label className="label">Customer Name *</label>
+              <input className="input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer name" />
+            </div>
+            <div>
+              <label className="label">Mobile No</label>
+              <input type="tel" inputMode="numeric" className="input" value={mobileNo} onChange={(e) => setMobileNo(e.target.value)} placeholder="e.g. 98765 43210" />
             </div>
           </div>
 
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[900px] border-collapse text-left text-sm" {...gridKeys}>
               <thead>
-                <tr className="table-head">
-                  <th className="rounded-l-lg px-3 py-1.5">Item</th>
-                  <th className="px-3 py-1.5 w-48">Batch (Available Qty)</th>
-                  <th className="px-3 py-1.5 w-24">Expiry</th>
-                  <th className="px-3 py-1.5 w-24">Qty</th>
-                  <th className="px-3 py-1.5 w-28">Rate</th>
-                  <th className="px-3 py-1.5 w-32">Amount</th>
-                  <th className="rounded-r-lg px-3 py-1.5 w-12" />
+                <tr className="bg-brand-50 font-bold text-brand-700">
+                  <th className={`${cell} w-8 text-center`}>#</th>
+                  <th className={`${cell} min-w-[220px]`}>Item Name</th>
+                  <th className={`${cell} w-60`}>Batch</th>
+                  <th className={`${cell} w-16`}>Rack</th>
+                  <th className={`${cell} w-16`}>Box</th>
+                  <th className={`${cell} w-16 text-right`}>Stock</th>
+                  <th className={`${cell} w-24 text-right`}>Sale Price</th>
+                  <th className={`${cell} w-24 text-right`}>Quantity</th>
+                  <th className={`${cell} w-24 text-right`}>Amount</th>
+                  <th className={`${cell} w-16`} />
                 </tr>
               </thead>
               <tbody>
-                {lines.map((l) => {
-                  const batchOptions = l.batches.map((b, i) => ({
-                    value: String(i),
-                    label: `${b.Batch || 'No batch'} — Exp ${formatExpiry(b.ExpiryDate)} — Avail ${b.AvailableQty}`,
-                  }));
+                {lines.map((l, r) => {
+                  const item = itemById.get(l.itemId);
+                  const b = batchOfLine(l);
+                  const problem = problemOf(l);
                   return (
-                    <tr key={l.key} className="table-row">
-                      <td className="px-3 py-1.5">
-                        <SearchSelect options={itemOptions} value={l.itemId} onChange={(v) => onPickItem(l.key, v)} placeholder="Select item" searchPlaceholder="Search item..." />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        {l.loadingBatches ? (
-                          <Spinner />
-                        ) : (
-                          <SearchSelect
-                            options={batchOptions}
-                            value={l.batchIndex}
-                            onChange={(idx) => onPickBatch(l.key, idx, l.batches)}
-                            placeholder={l.itemId ? (batchOptions.length ? 'Select batch' : 'No stock available') : 'Pick item first'}
-                            searchPlaceholder="Search batch..."
-                          />
-                        )}
-                      </td>
-                      <td className="px-3 py-1.5 text-ink-500">{formatExpiry(l.expiryDate)}</td>
-                      <td className="px-3 py-1.5">
-                        <input
-                          type="number" step="0.01" min="0" max={l.availableQty}
-                          className="input" value={l.qty}
-                          onChange={(e) => setLine(l.key, { qty: e.target.value })}
+                    <tr key={l.key} className="align-top">
+                      <td className={`${cell} text-center text-ink-400`}>{r + 1}</td>
+                      <td className={cell}>
+                        <SearchPick
+                          className={box} data-r={r} data-c={0} placeholder="Search item..."
+                          options={itemOptions} value={l.itemId} onChange={(v) => pickItem(l.key, v)}
                         />
                       </td>
-                      <td className="px-3 py-1.5">
-                        <input type="number" step="0.01" min="0" className="input" value={l.rate} onChange={(e) => setLine(l.key, { rate: e.target.value })} />
+                      <td className={cell}>
+                        <select
+                          className={box} data-r={r} data-c={1}
+                          disabled={!l.itemId || l.loading || !l.batches.length}
+                          value={l.batch ?? ''}
+                          onChange={(e) => setLine(l.key, { batch: e.target.value })}
+                        >
+                          {!l.itemId && <option value="">Pick an item first</option>}
+                          {l.itemId && l.loading && <option value="">Loading…</option>}
+                          {l.itemId && !l.loading && !l.batches.length && <option value="">No stock</option>}
+                          {l.batches.map((bt) => <option key={bt.Batch} value={bt.Batch}>{batchLabel(bt)}</option>)}
+                        </select>
                       </td>
-                      <td className="px-3 py-1.5 text-ink-600">
-                        {((Number(l.qty) || 0) * (Number(l.rate) || 0)).toFixed(2)}
+                      <td className={`${cell} font-bold text-brand-700`}>{item?.Rack || ''}</td>
+                      <td className={`${cell} font-bold text-brand-700`}>{item?.BoxNo || ''}</td>
+                      <td className={`${cell} text-right text-ink-600`}>{b ? b.AvailableQty : ''}</td>
+                      <td className={cell}>
+                        <input
+                          type="number" step="0.01" min="0" data-r={r} data-c={2}
+                          className={`${box} text-right ${problem?.price ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          value={l.price} disabled={!l.itemId}
+                          onChange={(e) => setLine(l.key, { price: e.target.value })}
+                        />
+                        {problem?.price && <p className="px-1 text-[11px] text-red-600">{problem.price}</p>}
                       </td>
-                      <td className="px-3 py-1.5">
-                        <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" onClick={() => removeLine(l.key)} title="Remove row">
-                          <Trash2 size={15} />
-                        </button>
+                      <td className={cell}>
+                        <input
+                          type="number" step="1" min="0" data-r={r} data-c={3}
+                          className={`${box} text-right ${problem?.qty ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          value={l.qty} disabled={!l.itemId}
+                          onChange={(e) => setLine(l.key, { qty: e.target.value })}
+                        />
+                        {problem?.qty && <p className="px-1 text-[11px] text-red-600">{problem.qty}</p>}
+                      </td>
+                      <td className={`${cell} text-right`}>{l.itemId ? money((Number(l.qty) || 0) * (Number(l.price) || 0)) : ''}</td>
+                      <td className={cell}>
+                        <div className="flex justify-center gap-0.5">
+                          <button type="button" className="rounded p-1 text-brand-600 hover:bg-brand-50" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={14} /></button>
+                          <button type="button" className="rounded p-1 text-red-500 hover:bg-red-50" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
+              <tfoot>
+                <tr className="bg-ink-50 font-semibold">
+                  <td className={`${cell} text-right`} colSpan={8}>Total</td>
+                  <td className={`${cell} text-right`}>{money(total)}</td>
+                  <td className={cell} />
+                </tr>
+              </tfoot>
             </table>
           </div>
 
-          <div className="mt-3 flex items-center justify-between">
-            <button type="button" className="btn-secondary" onClick={addLine}>
-              <Plus size={16} /> Add Row
+          <div className="mt-3 flex justify-end gap-2">
+            <button type="button" className="btn-secondary" onClick={() => (editingId ? navigate('/pharmacy/sales-billing-list') : resetForm())}>
+              <X size={16} /> Cancel
             </button>
-            <p className="text-sm font-semibold text-ink-700">Total: {total.toFixed(2)}</p>
-          </div>
-
-          <div className="mt-4 flex items-center gap-2">
-            <button type="submit" className="btn-primary" disabled={saving}>
-              <Save size={16} /> {saving ? (editingId ? 'Updating...' : 'Saving...') : editingId ? 'Update' : 'Save'}
+            <button type="submit" className="btn-primary" disabled={saving || hasProblem}>
+              <Save size={16} /> {saving ? 'Saving...' : editingId ? 'Update' : 'Save'}
             </button>
-            {editingId && (
-              <button type="button" className="btn-secondary" onClick={() => navigate('/pharmacy/sales-billing-list')}>
-                <X size={16} /> Cancel
-              </button>
-            )}
           </div>
         </form>
-      </div>
-
-      <div className="no-print">
-        <Modal open={!!printBill} onClose={() => setPrintBill(null)} title="Bill Saved">
-          {printBill && (
-            <div className="space-y-4">
-              <div className="rounded-lg bg-ink-50 p-4 text-sm">
-                <p><span className="font-semibold">Code:</span> {printBill.code}</p>
-                <p><span className="font-semibold">Customer:</span> {printBill.customerName || 'Walk-in'}</p>
-                <p><span className="font-semibold">Total:</span> {printBill.total.toFixed(2)}</p>
-              </div>
-              <p className="text-sm text-ink-500">Print this bill, or continue straight to the next one.</p>
-              <div className="flex justify-end gap-2">
-                <button type="button" className="btn-secondary" onClick={printReceipt}>
-                  <Printer size={16} /> Print
-                </button>
-                <button type="button" className="btn-primary" onClick={() => setPrintBill(null)}>
-                  Continue to Next Bill <ArrowRight size={16} />
-                </button>
-              </div>
-            </div>
-          )}
-        </Modal>
       </div>
 
       <SalesBillReceipt clinic={clinic} bill={printBill} />

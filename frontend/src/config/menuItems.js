@@ -30,40 +30,63 @@ export const MENU_GROUPS = [
   {
     group: 'Pharmacy',
     items: [
-      { key: 'pharmacy.supplier', label: 'Supplier', to: '/pharmacy/supplier' },
-      { key: 'pharmacy.item', label: 'Item', to: '/pharmacy/item' },
-      { key: 'pharmacy.item-list-new', label: 'Bulk Itemlist', to: '/pharmacy/item-list-new' },
+      // Laid out as the Pharmacy spec's parts (Item, Vendor, Purchase / Order,
+      // Stock In, Return, Sales, Report), each with Master / List. Keys are
+      // unchanged so existing Menu Access grants still apply. Supplier and
+      // Purchase Invoice stay until Stock In no longer needs a Purchase
+      // Invoice; Sales Return and the old Stock screen are off the menu
+      // (Stock Report replaces Stock) but their routes still work.
       {
-        label: 'Vendor',
+        label: 'Item',
         submenu: [
-          { key: 'pharmacy.vendor-master', label: 'Vendor Master', to: '/pharmacy/vendor-master' },
-          { key: 'pharmacy.vendor-list', label: 'Vendor List', to: '/pharmacy/vendor-list' },
+          { key: 'pharmacy.item', label: 'Master', to: '/pharmacy/item' },
+          { key: 'pharmacy.item-list', label: 'List', to: '/pharmacy/item-list' },
+          { key: 'pharmacy.item-list-new', label: 'Bulk Update', to: '/pharmacy/item-list-new' },
         ],
       },
       {
-        label: 'Purchase',
+        label: 'Vendor',
         submenu: [
-          { key: 'pharmacy.purchase-master', label: 'Purchase Master', to: '/pharmacy/purchase-master' },
-          { key: 'pharmacy.purchase-master-list', label: 'Purchase Master List', to: '/pharmacy/purchase-master-list' },
-          { key: 'pharmacy.purchase-invoice',label: 'Invoice', to: '/pharmacy/purchase-invoice' },
+          { key: 'pharmacy.vendor-master', label: 'Master', to: '/pharmacy/vendor-master' },
+          { key: 'pharmacy.vendor-list', label: 'List', to: '/pharmacy/vendor-list' },
+        ],
+      },
+      {
+        label: 'Purchase / Order',
+        submenu: [
+          { key: 'pharmacy.purchase-master', label: 'Master', to: '/pharmacy/purchase-master' },
+          { key: 'pharmacy.purchase-master-list', label: 'List', to: '/pharmacy/purchase-master-list' },
+          { key: 'pharmacy.purchase-invoice', label: 'Invoice', to: '/pharmacy/purchase-invoice' },
           { key: 'pharmacy.purchase-invoice-list', label: 'Invoice List', to: '/pharmacy/purchase-invoice-list' },
-          { key: 'pharmacy.purchase-return', label: 'Return', to: '/pharmacy/purchase-return' },
-          { key: 'pharmacy.purchase-return-list', label: 'Return List', to: '/pharmacy/purchase-return-list' },
+          { key: 'pharmacy.supplier', label: 'Supplier', to: '/pharmacy/supplier' },
+        ],
+      },
+      {
+        label: 'Stock In',
+        submenu: [
+          { key: 'pharmacy.stock-inward', label: 'Master', to: '/pharmacy/stock-inward' },
+          { key: 'pharmacy.stock-inward-list', label: 'List', to: '/pharmacy/stock-inward-list' },
+        ],
+      },
+      {
+        label: 'Return',
+        submenu: [
+          { key: 'pharmacy.purchase-return', label: 'Master', to: '/pharmacy/purchase-return' },
+          { key: 'pharmacy.purchase-return-list', label: 'List', to: '/pharmacy/purchase-return-list' },
         ],
       },
       {
         label: 'Sales',
         submenu: [
-          { key: 'pharmacy.sales-billing', label: 'Billing', to: '/pharmacy/sales-billing' },
-          { key: 'pharmacy.sales-billing-list', label: 'Billing List', to: '/pharmacy/sales-billing-list' },
-          { key: 'pharmacy.sales-return', label: 'Return', to: '/pharmacy/sales-return' },
+          { key: 'pharmacy.sales-billing', label: 'Master', to: '/pharmacy/sales-billing' },
+          { key: 'pharmacy.sales-billing-list', label: 'List', to: '/pharmacy/sales-billing-list' },
         ],
       },
       {
-        label: 'Stock',
+        label: 'Report',
         submenu: [
-          { key: 'pharmacy.stock', label: 'Stock', to: '/pharmacy/stock' },
-          { key: 'pharmacy.stock-inward', label: 'Inward', to: '/pharmacy/stock-inward' },
+          { key: 'pharmacy.stock-report', label: 'Stock Report', to: '/pharmacy/stock-report' },
+          { key: 'pharmacy.vendor-payments', label: 'Vendor Payments', to: '/pharmacy/vendor-payments' },
         ],
       },
     ],
