@@ -78,15 +78,13 @@ function UserMenu() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-ink-100"
+        className="flex items-center gap-2 rounded-lg px-1.5 py-0.5 transition-colors hover:bg-ink-100"
+        title="Signed in"
       >
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-gradient text-sm font-semibold text-white shadow-sm">
+        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-gradient text-[11px] font-semibold text-white shadow-sm">
           {initials}
         </div>
-        <div className="hidden leading-tight sm:block">
-          <p className="text-sm font-semibold text-ink-700">{user?.username || 'Account'}</p>
-          <p className="text-xs text-ink-400">Signed in</p>
-        </div>
+        <p className="hidden text-[13px] font-semibold text-ink-700 sm:block">{user?.username || 'Account'}</p>
         <ChevronDown size={14} className="hidden text-ink-400 sm:block" />
       </button>
 
@@ -114,21 +112,21 @@ function AppLayout({ appName }) {
   return (
     <div className="flex h-full flex-col">
       <div className="no-print sticky top-0 z-20">
-        <header className="relative z-10 flex items-center gap-3 border-b border-ink-100 bg-white/85 px-4 py-1 backdrop-blur-md lg:px-6">
+        <header className="relative z-10 flex items-center gap-3 border-b border-ink-100 bg-white/85 px-4 py-0.5 backdrop-blur-md lg:px-6">
           <button
             onClick={() => setNavOpen((o) => !o)}
-            className="rounded-lg p-1.5 text-ink-600 transition-colors hover:bg-ink-100"
+            className="rounded-lg p-1 text-ink-600 transition-colors hover:bg-ink-100"
             aria-label="Toggle menu"
             title="Show / hide menu"
           >
-            <Menu size={20} />
+            <Menu size={18} />
           </button>
-          <div className="flex-1">
-            <p className="font-display text-lg font-bold tracking-tight text-brand-800 sm:text-xl">{clinicName || appName}</p>
-            <p className="hidden text-xs text-ink-300 sm:block">Healthcare operations dashboard</p>
+          <div className="flex min-w-0 flex-1 items-baseline gap-2">
+            <p className="truncate font-display text-base font-bold tracking-tight text-brand-800 sm:text-lg">{clinicName || appName}</p>
+            <p className="hidden truncate text-xs text-ink-300 md:block">Healthcare operations dashboard</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-full border border-ink-100 bg-ink-50 px-3 py-1.5 text-xs text-ink-400 sm:flex">
+            <div className="hidden items-center gap-1.5 rounded-full border border-ink-100 bg-ink-50 px-2.5 py-0.5 text-[11px] text-ink-400 sm:flex">
               <span className="h-1.5 w-1.5 rounded-full bg-teal-500" /> Connected
             </div>
             <UserMenu />

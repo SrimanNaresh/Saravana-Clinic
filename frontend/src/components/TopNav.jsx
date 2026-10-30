@@ -282,7 +282,9 @@ function DesktopColumnsPanel({ item, rect, panelRef, onNavigate }) {
                 className="relative overflow-hidden rounded-lg bg-white px-2 pb-1.5 pt-2 ring-1 ring-ink-100 transition-shadow hover:shadow-md hover:ring-ink-200"
               >
                 <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${accent.edge}`} />
-                <div className="mb-1 flex items-center gap-1.5 px-1.5">
+                {/* Same height on every card (room for a heading that wraps,
+                    like "Purchase / Order"), so the pages line up across cards. */}
+                <div className="mb-1 flex h-[34px] items-center gap-1.5 px-1.5">
                   <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br text-white shadow-sm ${accent.chip}`}>
                     <Icon size={13} strokeWidth={2.25} />
                   </span>
