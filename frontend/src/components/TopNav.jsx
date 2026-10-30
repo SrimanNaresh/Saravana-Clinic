@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Pill, ClipboardList, UserPlus, UserCheck,
   FileText, ChevronDown, ChevronRight, Stethoscope, Settings, Receipt, MessageCircle, TestTube, Sparkles, Package, Building2,
-  ShoppingCart, Boxes,
+  ShoppingCart, Boxes, Store, PackagePlus, Undo2, BarChart3, Search, X,
 } from 'lucide-react';
 import { MENU_GROUPS } from '../config/menuItems.js';
 import { menuAccessApi } from '../api/client.js';
@@ -32,6 +32,12 @@ const SUBMENU_ICONS = {
   Purchase: ShoppingCart,
   Sales: Receipt,
   Stock: Boxes,
+  Item: Package,
+  Vendor: Store,
+  'Purchase / Order': ShoppingCart,
+  'Stock In': PackagePlus,
+  Return: Undo2,
+  Report: BarChart3,
 };
 
 // A leaf has `to`; a node has `submenu` (an array of further leaves/nodes,
@@ -109,7 +115,194 @@ function DesktopNode({ node, pathname, onNavigate, depth }) {
   );
 }
 
+// Accent per column (icon chip and top edge), cycled in order. Static class
+// strings so Tailwind's scanner keeps them.
+const ACCENTS = [
+  { chip: 'from-blue-500 to-indigo-600', edge: 'from-blue-500 to-indigo-500' },
+  { chip: 'from-teal-500 to-emerald-600', edge: 'from-teal-400 to-emerald-500' },
+  { chip: 'from-violet-500 to-purple-600', edge: 'from-violet-400 to-purple-500' },
+  { chip: 'from-amber-500 to-orange-600', edge: 'from-amber-400 to-orange-500' },
+  { chip: 'from-rose-500 to-pink-600', edge: 'from-rose-400 to-pink-500' },
+  { chip: 'from-sky-500 to-cyan-600', edge: 'from-sky-400 to-cyan-500' },
+  { chip: 'from-emerald-500 to-green-600', edge: 'from-emerald-400 to-green-500' },
+];
+
+// The label with the searched-for text marked.
+function Highlight({ text, query }) {
+  const i = query ? text.toLowerCase().indexOf(query) : -1;
+  if (i < 0) return text;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark className="rounded-sm bg-amber-200/70 px-px text-inherit">{text.slice(i, i + query.length)}</mark>
+      {text.slice(i + query.length)}
+    </>
+  );
+}
+
+// The nodes whose label (or a parent section's label) contains `query`;
+// sections keep only their matching pages. Empty query keeps everything.
+function filterByQuery(nodes, query) {
+  if (!query) return nodes;
+  return nodes.map((n) => {
+    if (n.label.toLowerCase().includes(query)) return n;
+    if (!n.submenu) return null;
+    const submenu = filterByQuery(n.submenu, query);
+    return submenu.length ? { ...n, submenu } : null;
+  }).filter(Boolean);
+}
+
+function firstLeaf(nodes) {
+  for (const n of nodes) {
+    const leaf = n.submenu ? firstLeaf(n.submenu) : n;
+    if (leaf) return leaf;
+  }
+  return null;
+}
+
+// Card width the panel aims for, and the narrowest a card may get.
+const CARD_WIDTH = 168;
+const CARD_MIN = 136;
+
+const pageCount = (nodes) => nodes.reduce((n, c) => n + (c.submenu ? pageCount(c.submenu) : 1), 0);
+
+// A column's pages; a nested submenu (Consultation > Medication) shows as a
+// small sub-heading with a rule; its pages line up with the card's others.
+function ColumnLinks({ nodes, onNavigate, query }) {
+  return nodes.map((child) => (child.submenu ? (
+    <div key={child.label} className="mt-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5 px-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-400"><Highlight text={child.label} query={query} /></span>
+        <span className="h-px flex-1 bg-ink-100" />
+      </div>
+      <ColumnLinks nodes={child.submenu} onNavigate={onNavigate} query={query} />
+    </div>
+  ) : (
+    <NavLink
+      key={child.to || child.label}
+      to={child.to}
+      onClick={onNavigate}
+      className={({ isActive }) =>
+        `group flex items-start gap-1 rounded-md px-1.5 py-[3px] text-[13px] leading-[18px] transition-all ${
+          isActive ? 'bg-brand-50 font-semibold text-brand-700' : 'text-ink-600 hover:bg-ink-50 hover:text-brand-700'
+        }`
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <ChevronRight
+            size={12}
+            strokeWidth={2.5}
+            className={`mt-[3px] shrink-0 transition-transform group-hover:translate-x-0.5 ${isActive ? 'text-brand-600' : 'text-ink-300 group-hover:text-brand-500'}`}
+          />
+          <span><Highlight text={child.label} query={query} /></span>
+        </>
+      )}
+    </NavLink>
+  )));
+}
+
+// A group made of several submenus (Pharmacy: Item, Vendor, Purchase / Order,
+// ...; Clinic: Consultation, Patient Queue, ...) opens as a row of small cards,
+// centred on the screen and wrapping to more rows when they don't fit. Each
+// card is one part: an accent-coloured icon chip and title, then its pages.
+// Pages sitting directly in the group (Clinic Master) form a first card
+// titled with the group's own name. The search box in the header narrows the
+// cards to matching pages; Enter opens the first match.
+function DesktopColumnsPanel({ item, rect, panelRef, onNavigate }) {
+  const navigate = useNavigate();
+  const [query, setQuery] = useState('');
+  const direct = item.children.filter((c) => !c.submenu);
+  const parts = [
+    ...(direct.length ? [{ label: item.label, icon: item.icon, submenu: direct }] : []),
+    ...item.children.filter((c) => c.submenu),
+  ];
+  const q = query.trim().toLowerCase();
+  // Each card keeps its accent colour (its index) while others are filtered out.
+  const shown = parts
+    .map((part, i) => ({ part: part.label.toLowerCase().includes(q) ? part : { ...part, submenu: filterByQuery(part.submenu, q) }, i }))
+    .filter(({ part }) => part.submenu.length);
+  const matches = shown.reduce((n, { part }) => n + pageCount(part.submenu), 0);
+
+  // Fixed width and an even grid: cards share the width with no gaps at the
+  // sides, fewer columns (more rows) on a narrow screen, and the panel keeps
+  // its size while searching.
+  const width = Math.min(window.innerWidth - 16, parts.length * CARD_WIDTH + 16);
+  const cols = Math.max(1, Math.min(parts.length, Math.floor((width - 16) / CARD_MIN)));
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      const leaf = firstLeaf(shown.map(({ part }) => part));
+      if (leaf) { navigate(leaf.to); onNavigate(); }
+    } else if (e.key === 'Escape') {
+      // First Esc clears the search, the next closes the menu.
+      if (query) setQuery('');
+      else onNavigate();
+    }
+  };
+
+  const GroupIcon = item.icon;
+  return createPortal(
+    <div
+      ref={panelRef}
+      style={{ position: 'fixed', top: rect.bottom + 6, left: '50%', transform: 'translateX(-50%)', width, maxWidth: 'calc(100vw - 16px)' }}
+      className="z-50 max-h-[78vh] overflow-y-auto rounded-xl border border-ink-200/70 bg-gradient-to-b from-slate-50 to-white shadow-elevated animate-fade-in"
+    >
+      <div className="flex items-center gap-2 border-b border-ink-100 px-3 py-1.5">
+        <GroupIcon size={13} className="text-brand-600" />
+        <span className="text-xs font-semibold text-ink-700">{item.label}</span>
+        <span className="text-[11px] text-ink-400">· {q ? `${matches} match${matches === 1 ? '' : 'es'}` : `${parts.length} sections`}</span>
+        <div className="relative ml-auto w-56">
+          <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-400" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={`Search ${item.label} pages...`}
+            className="h-7 w-full rounded-md border border-ink-200 bg-white pl-7 pr-6 text-xs text-ink-700 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          />
+          {query && (
+            <button type="button" title="Clear" onClick={() => setQuery('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600">
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+      {shown.length === 0 ? (
+        <p className="px-4 py-6 text-center text-xs text-ink-400">No pages match &ldquo;{query.trim()}&rdquo;.</p>
+      ) : (
+        <div className="grid gap-1.5 p-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          {shown.map(({ part, i }) => {
+            const Icon = part.icon || SUBMENU_ICONS[part.label] || Pill;
+            const accent = ACCENTS[i % ACCENTS.length];
+            return (
+              <div
+                key={part.label}
+                className="relative overflow-hidden rounded-lg bg-white px-2 pb-1.5 pt-2 ring-1 ring-ink-100 transition-shadow hover:shadow-md hover:ring-ink-200"
+              >
+                <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${accent.edge}`} />
+                <div className="mb-1 flex items-center gap-1.5 px-1.5">
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br text-white shadow-sm ${accent.chip}`}>
+                    <Icon size={13} strokeWidth={2.25} />
+                  </span>
+                  <span className="min-w-0 text-[13px] font-semibold leading-tight text-ink-800"><Highlight text={part.label} query={q} /></span>
+                </div>
+                <ColumnLinks nodes={part.submenu} onNavigate={onNavigate} query={q} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>,
+    document.body
+  );
+}
+
 function DesktopDropdownPanel({ item, pathname, rect, panelRef, onNavigate }) {
+  if (item.children.filter((c) => c.submenu).length > 1) {
+    return <DesktopColumnsPanel item={item} rect={rect} panelRef={panelRef} onNavigate={onNavigate} />;
+  }
   const left = Math.min(Math.max(rect.left, 8), window.innerWidth - DROPDOWN_WIDTH - 8);
 
   return createPortal(
