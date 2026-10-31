@@ -47,7 +47,8 @@ router.get('/orders', async (req, res) => {
 async function orderLines(request, orderId, excludeStockInId) {
   const r = await request.input('orderId', sql.Int, orderId).input('exclude', sql.Int, excludeStockInId || null).query(`
     SELECT l.LineId AS PoLineId, l.ItemId, l.ItemName, l.GenericName, l.Manufacturer, l.HSNCode, l.Category, l.Pack,
-           ISNULL(l.Unit, u.Name) AS Unit, l.MRP, l.Rate, l.Quantity AS Ordered, l.FreeQty AS FreeOrdered,
+           ISNULL(l.Unit, u.Name) AS Unit, l.MRP, ISNULL(l.PRate, l.MRP) AS PRate, l.DiscPercent, l.Rate,
+           l.Quantity AS Ordered, l.FreeQty AS FreeOrdered,
            l.CGSTPercent, l.SGSTPercent, ISNULL(rc.Paid, 0) AS Received, ISNULL(rc.Free, 0) AS FreeReceived
     FROM PurchaseOrderItem l
     LEFT JOIN PharmacyItem i ON i.ItemId = l.ItemId
