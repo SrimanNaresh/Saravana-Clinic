@@ -7,20 +7,25 @@ import SearchPick from '../../components/grid/SearchPick.jsx';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
 import { pharmacyItemApi, salesBillingApi, clinicApi } from '../../api/client.js';
+import { packSize } from '../../utils/purchaseCalc.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const today = () => new Date().toISOString().slice(0, 10);
 const money = (n) => (Number(n) || 0).toFixed(2);
 const round2 = (n) => Math.round(n * 100) / 100;
 const expLabel = (iso) => (iso ? `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : 'No expiry');
-const batchLabel = (b) => `${b.Batch || 'No batch'} · Exp ${expLabel(b.ExpiryDate)} · ${b.AvailableQty}`;
+const qtyLabel = (n) => String(Math.round(Number(n) * 100) / 100);
+const batchLabel = (b) => `${b.Batch || 'No batch'} · Exp ${expLabel(b.ExpiryDate)} · ${qtyLabel(b.AvailableQty)}`;
 
+// saleUnit: 'pack' (the whole pack) or 'unit' (one piece). packPrice is the
+// pack's selling price; a unit's is packPrice / pack size.
 let nextKey = 1;
-const emptyLine = () => ({ key: nextKey++, itemId: '', batches: [], batch: null, qty: '', price: '', loading: false });
+const emptyLine = () => ({ key: nextKey++, itemId: '', batches: [], batch: null, saleUnit: 'pack', packPrice: '', qty: '', price: '', loading: false });
 
 // Pharmacy > Sales > Master: a counter sale. Each line is sold from one batch
-// (only batches with stock left, earliest expiry first); the server re-checks
-// every quantity, price and total.
+// (only batches with stock left, earliest expiry first), by the Pack or by the
+// Unit (a single piece of it); the server re-checks every quantity, price and
+// total. Stock is counted in packs, so 5 units of a 10's pack take 0.5.
 export default function SalesBilling() {
   const { toast, show } = useToast();
   const location = useLocation();
@@ -51,38 +56,51 @@ export default function SalesBilling() {
 
   const defaultPrice = (item) => item?.SellPrice ?? item?.MRP ?? '';
 
+  const sizeOf = (l) => packSize(itemById.get(l.itemId)?.Pack);
+  // The line's price for its pack price and unit choice.
+  const priceFor = (l, packPrice, saleUnit) => {
+    const pp = Number(packPrice);
+    if (packPrice === '' || Number.isNaN(pp)) return '';
+    return String(saleUnit === 'unit' ? round2(pp / sizeOf(l)) : pp);
+  };
+
   const pickItem = async (key, itemId) => {
     const item = itemById.get(itemId);
-    setLine(key, { itemId, batches: [], batch: null, price: defaultPrice(item), qty: '1', loading: true });
+    const pp = String(defaultPrice(item));
+    setLine(key, { itemId, batches: [], batch: null, saleUnit: 'pack', packPrice: pp, price: pp, qty: '1', loading: true });
     try {
       const batches = await salesBillingApi.batches(itemId, editingId || undefined);
       // The earliest-expiring batch is chosen to start with, at its Stock In selling price.
       const first = batches[0];
-      setLine(key, { batches, batch: first?.Batch ?? null, loading: false, ...(first?.SelAmount != null ? { price: String(first.SelAmount) } : {}) });
+      setLine(key, { batches, batch: first?.Batch ?? null, loading: false, ...(first?.SelAmount != null ? { packPrice: String(first.SelAmount), price: String(first.SelAmount) } : {}) });
     } catch {
       show('Failed to load batches for this item', 'error');
       setLine(key, { loading: false });
     }
   };
 
-  // Stock of each line's batch, and how much all lines together take from it.
+  // Stock of each line's batch (in packs), and how many packs all lines take from it.
   const batchOfLine = (l) => l.batches.find((b) => b.Batch === l.batch);
+  const packsOf = (l) => (Number(l.qty) || 0) / (l.saleUnit === 'unit' ? sizeOf(l) : 1);
   const used = new Map();
   for (const l of lines) {
     if (l.itemId && l.batch != null) {
       const k = `${l.itemId}|${l.batch}`;
-      used.set(k, (used.get(k) || 0) + (Number(l.qty) || 0));
+      used.set(k, (used.get(k) || 0) + packsOf(l));
     }
   }
+  // A batch's stock in the line's own unit.
+  const stockIn = (l, b) => (l.saleUnit === 'unit' ? Math.floor(b.AvailableQty * sizeOf(l) + 1e-6) : qtyLabel(b.AvailableQty));
   const problemOf = (l) => {
     if (!l.itemId) return null;
     const b = batchOfLine(l);
     if (!b) return { qty: 'No stock' };
-    if (used.get(`${l.itemId}|${l.batch}`) > b.AvailableQty) return { qty: `Only ${b.AvailableQty} in stock` };
-    const mrp = Number(itemById.get(l.itemId)?.MRP);
+    if (used.get(`${l.itemId}|${l.batch}`) > b.AvailableQty + 0.00005) return { qty: `Only ${stockIn(l, b)} ${l.saleUnit === 'unit' ? 'unit(s)' : 'pack(s)'} in stock` };
+    const mrp = round2(Number(itemById.get(l.itemId)?.MRP) / (l.saleUnit === 'unit' ? sizeOf(l) : 1));
     if (mrp > 0 && Number(l.price) > mrp) return { price: `Above MRP ${money(mrp)}` };
     return null;
   };
+  const changeUnit = (l, saleUnit) => setLine(l.key, { saleUnit, price: priceFor(l, l.packPrice, saleUnit) });
   const filled = lines.filter((l) => l.itemId);
   const hasProblem = filled.some((l) => problemOf(l) || !(Number(l.qty) > 0) || !(Number(l.price) > 0));
   const total = round2(filled.reduce((s, l) => s + round2((Number(l.qty) || 0) * (Number(l.price) || 0)), 0));
@@ -105,7 +123,10 @@ export default function SalesBilling() {
         try { batches = await salesBillingApi.batches(l.ItemId, id); } catch { /* keeps the saved batch only */ }
         const batch = l.Batch || '';
         if (!batches.some((b) => b.Batch === batch)) batches = [...batches, { Batch: batch, ExpiryDate: l.ExpiryDate, AvailableQty: 0 }];
-        return { ...emptyLine(), itemId: String(l.ItemId), batches, batch, qty: String(Number(l.Quantity)), price: String(Number(l.Rate)) };
+        const saleUnit = l.SaleUnit === 'unit' ? 'unit' : 'pack';
+        const size = Number(l.PackSize) || 1;
+        const packPrice = String(batches.find((b) => b.Batch === batch)?.SelAmount ?? round2(Number(l.Rate) * (saleUnit === 'unit' ? size : 1)));
+        return { ...emptyLine(), itemId: String(l.ItemId), batches, batch, saleUnit, packPrice, qty: String(Number(l.UnitQty)), price: String(Number(l.Rate)) };
       }));
       setEditingId(id);
       setTransDate(String(sale.TransDate).slice(0, 10));
@@ -137,7 +158,7 @@ export default function SalesBilling() {
     try {
       const payload = {
         transDate, customerName, mobileNo,
-        items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, quantity: Number(l.qty), rate: Number(l.price) })),
+        items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, saleUnit: l.saleUnit, quantity: Number(l.qty), rate: Number(l.price) })),
       };
       if (editingId) {
         await salesBillingApi.update(editingId, payload);
@@ -148,7 +169,7 @@ export default function SalesBilling() {
         setPrintBill({
           code: saved.Code, transDate, customerName,
           lines: filled.map((l) => ({
-            itemName: itemById.get(l.itemId)?.Name || '', batch: l.batch,
+            itemName: `${itemById.get(l.itemId)?.Name || ''}${l.saleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.batch,
             qty: Number(l.qty), rate: Number(l.price), amount: round2(Number(l.qty) * Number(l.price)),
           })),
           total: Number(saved.TotalAmount),
@@ -204,12 +225,13 @@ export default function SalesBilling() {
           </div>
 
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[900px] border-collapse text-left text-sm" {...gridKeys}>
+            <table className="w-full min-w-[1000px] border-collapse text-left text-sm" {...gridKeys}>
               <thead>
                 <tr className="bg-brand-50 font-bold text-brand-700">
                   <th className={`${cell} w-8 text-center`}>#</th>
                   <th className={`${cell} min-w-[220px]`}>Item Name</th>
                   <th className={`${cell} w-60`}>Batch</th>
+                  <th className={`${cell} w-28`} title="Sell the whole pack, or single units of it">Sell by</th>
                   <th className={`${cell} w-16`}>Rack</th>
                   <th className={`${cell} w-16`}>Box</th>
                   <th className={`${cell} w-16 text-right`}>Stock</th>
@@ -240,7 +262,7 @@ export default function SalesBilling() {
                           value={l.batch ?? ''}
                           onChange={(e) => {
                             const bt = l.batches.find((x) => x.Batch === e.target.value);
-                            setLine(l.key, { batch: e.target.value, ...(bt?.SelAmount != null ? { price: String(bt.SelAmount) } : {}) });
+                            setLine(l.key, { batch: e.target.value, ...(bt?.SelAmount != null ? { packPrice: String(bt.SelAmount), price: priceFor(l, bt.SelAmount, l.saleUnit) } : {}) });
                           }}
                         >
                           {!l.itemId && <option value="">Pick an item first</option>}
@@ -249,21 +271,34 @@ export default function SalesBilling() {
                           {l.batches.map((bt) => <option key={bt.Batch} value={bt.Batch}>{batchLabel(bt)}</option>)}
                         </select>
                       </td>
+                      <td className={cell}>
+                        <select
+                          className={box} data-r={r} data-c={2} disabled={!l.itemId}
+                          value={l.saleUnit} onChange={(e) => changeUnit(l, e.target.value)}
+                          title={l.itemId && sizeOf(l) <= 1 ? 'Set a pack count (e.g. 10\'s) on the item to sell single units' : ''}
+                        >
+                          <option value="pack">Pack{item?.Pack ? ` (${item.Pack})` : ''}</option>
+                          <option value="unit" disabled={!!l.itemId && sizeOf(l) <= 1}>Unit</option>
+                        </select>
+                      </td>
                       <td className={`${cell} font-bold text-brand-700`}>{item?.Rack || ''}</td>
                       <td className={`${cell} font-bold text-brand-700`}>{item?.BoxNo || ''}</td>
-                      <td className={`${cell} text-right text-ink-600`}>{b ? b.AvailableQty : ''}</td>
+                      <td className={`${cell} text-right text-ink-600`}>{b ? stockIn(l, b) : ''}</td>
                       <td className={cell}>
                         <input
-                          type="number" step="0.01" min="0" data-r={r} data-c={2}
+                          type="number" step="0.01" min="0" data-r={r} data-c={3}
                           className={`${box} no-spin text-right ${problem?.price ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={l.price} disabled={!l.itemId}
                           onChange={(e) => setLine(l.key, { price: e.target.value })}
                         />
                         {problem?.price && <p className="px-1 text-[11px] text-red-600">{problem.price}</p>}
+                        {l.itemId && l.packPrice !== '' && sizeOf(l) > 1 && (
+                          <p className="px-1 text-right text-[11px] text-ink-400">Pack {money(l.packPrice)} · Unit {money(Number(l.packPrice) / sizeOf(l))}</p>
+                        )}
                       </td>
                       <td className={cell}>
                         <input
-                          type="number" step="1" min="0" data-r={r} data-c={3}
+                          type="number" step="1" min="0" data-r={r} data-c={4}
                           className={`${box} no-spin text-right ${problem?.qty ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={l.qty} disabled={!l.itemId}
                           onChange={(e) => setLine(l.key, { qty: e.target.value })}
@@ -283,7 +318,7 @@ export default function SalesBilling() {
               </tbody>
               <tfoot>
                 <tr className="bg-ink-50 font-semibold">
-                  <td className={`${cell} text-right`} colSpan={8}>Total</td>
+                  <td className={`${cell} text-right`} colSpan={9}>Total</td>
                   <td className={`${cell} text-right`}>{money(total)}</td>
                   <td className={cell} />
                 </tr>

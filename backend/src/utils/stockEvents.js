@@ -25,8 +25,9 @@ export const EVENTS = `
   FROM StockInward si JOIN Vendor v ON v.VendorId = si.VendorId
   WHERE si.IsActive = 1 AND (@itemId IS NULL OR si.ItemId = @itemId)
   UNION ALL
-  SELECT l.ItemId, 'purchase', l.Quantity, h.CreatedAt, h.InDate,
-         'Stock In ' + ${docNoSql('SI', 'h.StockInId')} + ' · batch ' + l.BatchNo,
+  SELECT l.ItemId, 'purchase', l.Quantity + l.FreeQty, h.CreatedAt, h.InDate,
+         'Stock In ' + ${docNoSql('SI', 'h.StockInId')} + ' · batch ' + l.BatchNo
+           + CASE WHEN l.FreeQty > 0 THEN ' · incl. ' + FORMAT(l.FreeQty, '0.##') + ' free' ELSE '' END,
          v.VendorName, h.CreatedBy, 'stock-in', h.StockInId
   FROM StockInItem l JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
   JOIN Vendor v ON v.VendorId = h.VendorId

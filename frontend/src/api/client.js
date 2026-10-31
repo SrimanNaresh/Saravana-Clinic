@@ -160,6 +160,8 @@ export const itemMasterApi = {
 export const purchaseOrderApi = {
   list: (search = '') => api.get('/purchase-orders', { params: { search } }).then((r) => r.data),
   get: (id) => api.get(`/purchase-orders/${id}`).then((r) => r.data),
+  // { itemId: last net rate (P.Rate less Disc %) from this vendor } for the Old Price column
+  lastRates: (vendorId, excludeOrderId) => api.get('/purchase-orders/last-rates', { params: { vendorId, excludeOrderId } }).then((r) => r.data),
   create: (data) => api.post('/purchase-orders', data).then((r) => r.data),
   update: (id, data) => api.put(`/purchase-orders/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/purchase-orders/${id}`).then((r) => r.data),

@@ -25,7 +25,7 @@ export async function batchStock(request, itemIds, { excludeSaleId = null } = {}
         FROM StockInward si
         WHERE si.IsActive = 1 AND si.ItemId IN (SELECT ItemId FROM Ids)
         UNION ALL
-        SELECT l.ItemId, l.BatchNo, l.ExpDate, l.Quantity
+        SELECT l.ItemId, l.BatchNo, l.ExpDate, l.Quantity + l.FreeQty
         FROM StockInItem l JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
         WHERE l.ItemId IN (SELECT ItemId FROM Ids)
       ),

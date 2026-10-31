@@ -33,7 +33,10 @@ const ITEM_SELECT = `
          ISNULL(i.SGSTPercent, i.GSTPercent / 2) AS SGSTPercent,
          i.GSTPercent,
          CASE WHEN i.ScheduleH1 = 1 THEN 'H1' WHEN i.ScheduleH = 1 THEN 'H' ELSE 'None' END AS Schedule,
-         i.Status, ISNULL(st.CurrentStock, 0) AS Stock
+         i.Status, ISNULL(st.CurrentStock, 0) AS Stock,
+         ISNULL((SELECT TOP 1 pol.PRate FROM PurchaseOrderItem pol
+                 JOIN PurchaseOrder po ON po.PurchaseOrderId = pol.PurchaseOrderId AND po.IsActive = 1
+                 WHERE pol.ItemId = i.ItemId AND pol.PRate IS NOT NULL ORDER BY pol.LineId DESC), i.PurchaseRate) AS LastPRate
   FROM PharmacyItem i
   LEFT JOIN UnitMaster u ON u.UnitId = i.UnitId
   LEFT JOIN GenericNameMaster g ON g.GenericNameId = i.GenericNameId

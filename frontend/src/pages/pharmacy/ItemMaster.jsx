@@ -109,11 +109,11 @@ export default function ItemMaster() {
             }
           />
 
-          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4 lg:grid-cols-[2.4fr_1.6fr_repeat(8,minmax(0,1fr))]">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4 lg:grid-cols-[2.4fr_1fr_1.6fr_repeat(7,minmax(0,1fr))]">
             {field('Item Name *', <input className={inp} value={form.name} onChange={onInput('name')} placeholder="e.g. Arnica Montana" />, 'col-span-2 sm:col-span-2 lg:col-span-1')}
-            {field('Type / Unit', <CellCombo className={combo} value={form.unit} onChange={set('unit')} placeholder="Pick or add" {...handlersFor('unit')} />, 'col-span-2 sm:col-span-2 lg:col-span-1')}
-            {field('HSN',<input className={inp} value={form.hsnCode} onChange={onInput('hsnCode')} />)}
             {field('Pack', <input className={inp} value={form.pack} onChange={onInput('pack')} placeholder="10's" />)}
+            {field('Type / Unit', <CellCombo className={combo} value={form.unit} onChange={set('unit')} placeholder="Pick or add" {...handlersFor('unit')} />)}
+            {field('HSN', <input className={inp} value={form.hsnCode} onChange={onInput('hsnCode')} />)}
             {field(editing ? 'Quantity (stock)' : 'Quantity', (
               <input type="number" min="0" step="any" className={inp} value={form.quantity} onChange={onInput('quantity')} title={editing ? 'Changing it records a stock adjustment' : 'Opening stock'} />
             ))}

@@ -36,7 +36,7 @@ router.get('/stock-ins', async (req, res) => {
 // A Stock In's lines with what other returns (not ?excludeReturnId=) took and what's left.
 async function stockInLines(request, stockInId, excludeReturnId) {
   const r = await request.input('stockInId', sql.Int, stockInId).input('exclude', sql.Int, excludeReturnId || null).query(`
-    SELECT l.LineId AS StockInLineId, l.ItemId, i.Name AS ItemName, l.BatchNo, l.MfgDate, l.ExpDate, l.Rate, l.Quantity AS Received,
+    SELECT l.LineId AS StockInLineId, l.ItemId, i.Name AS ItemName, l.BatchNo, l.MfgDate, l.ExpDate, l.Rate, l.Quantity + l.FreeQty AS Received,
            ISNULL((SELECT SUM(ri.Quantity) FROM StockReturnItem ri JOIN StockReturn rh ON rh.StockReturnId = ri.StockReturnId AND rh.IsActive = 1
                    WHERE ri.StockInLineId = l.LineId AND (@exclude IS NULL OR rh.StockReturnId <> @exclude)), 0) AS Returned
     FROM StockInItem l JOIN PharmacyItem i ON i.ItemId = l.ItemId

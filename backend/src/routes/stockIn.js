@@ -6,7 +6,7 @@ import { selAmount } from '../utils/purchaseCalc.js';
 
 // Pharmacy > Stock In: goods received against a Purchase Order. Saving adds
 // stock (stock is read from these rows, see utils/batchStock.js) and sets each
-// item's selling price to the line's Sel.Amount. A Stock In whose batches a
+// item's selling price to the line's Sel.Amount (MRP less Discount %). A Stock In whose batches a
 // Return or a Sale has used can no longer be edited.
 const router = Router();
 
@@ -40,15 +40,28 @@ router.get('/orders', async (req, res) => {
 });
 
 // An order's lines with what's been received by other Stock Ins (the one
-// being edited, ?excludeStockInId=, doesn't count) and what's still due.
+// being edited, ?excludeStockInId=, doesn't count) and what's still due, kept
+// apart for the paid units (Ordered / Received / Due) and the free ones
+// (FreeOrdered / FreeReceived / FreeDue). Unit is the line's copy, or the
+// item's unit for lines saved before units were copied.
 async function orderLines(request, orderId, excludeStockInId) {
   const r = await request.input('orderId', sql.Int, orderId).input('exclude', sql.Int, excludeStockInId || null).query(`
     SELECT l.LineId AS PoLineId, l.ItemId, l.ItemName, l.GenericName, l.Manufacturer, l.HSNCode, l.Category, l.Pack,
-           l.MRP, l.Rate, l.Quantity AS Ordered, l.CGSTPercent, l.SGSTPercent,
-           ISNULL((SELECT SUM(si.Quantity) FROM StockInItem si JOIN StockIn h ON h.StockInId = si.StockInId AND h.IsActive = 1
-                   WHERE si.PoLineId = l.LineId AND (@exclude IS NULL OR h.StockInId <> @exclude)), 0) AS Received
-    FROM PurchaseOrderItem l WHERE l.PurchaseOrderId = @orderId ORDER BY l.LineId`);
-  return r.recordset.map((l) => ({ ...l, Ordered: Number(l.Ordered), Received: Number(l.Received), Due: Math.max(0, Number(l.Ordered) - Number(l.Received)) }));
+           ISNULL(l.Unit, u.Name) AS Unit, l.MRP, l.Rate, l.Quantity AS Ordered, l.FreeQty AS FreeOrdered,
+           l.CGSTPercent, l.SGSTPercent, ISNULL(rc.Paid, 0) AS Received, ISNULL(rc.Free, 0) AS FreeReceived
+    FROM PurchaseOrderItem l
+    LEFT JOIN PharmacyItem i ON i.ItemId = l.ItemId
+    LEFT JOIN UnitMaster u ON u.UnitId = i.UnitId
+    OUTER APPLY (
+      SELECT SUM(si.Quantity) AS Paid, SUM(si.FreeQty) AS Free
+      FROM StockInItem si JOIN StockIn h ON h.StockInId = si.StockInId AND h.IsActive = 1
+      WHERE si.PoLineId = l.LineId AND (@exclude IS NULL OR h.StockInId <> @exclude)
+    ) rc
+    WHERE l.PurchaseOrderId = @orderId ORDER BY l.LineId`);
+  return r.recordset.map((l) => {
+    const n = { Ordered: Number(l.Ordered), FreeOrdered: Number(l.FreeOrdered), Received: Number(l.Received), FreeReceived: Number(l.FreeReceived) };
+    return { ...l, ...n, Due: Math.max(0, n.Ordered - n.Received), FreeDue: Math.max(0, n.FreeOrdered - n.FreeReceived) };
+  });
 }
 
 router.get('/order-lines/:orderId', async (req, res) => {
@@ -67,7 +80,7 @@ router.get('/', async (req, res) => {
     const pool = await getPool();
     const r = await pool.request().input('search', sql.NVarChar, `%${search}%`).query(`
       SELECT h.StockInId, ${SI_NO} AS StockInNo, h.InDate, h.VendorId, v.VendorName, ${PO_NO} AS OrderNo,
-             l.LineId, l.ItemId, i.Name AS ItemName, l.BatchNo, l.MfgDate, l.ExpDate, l.Quantity, l.Rate, l.MRP,
+             l.LineId, l.ItemId, i.Name AS ItemName, l.BatchNo, l.MfgDate, l.ExpDate, l.Quantity, l.FreeQty, l.Rate, l.MRP,
              l.SalesPercent, l.DiscPercent, l.SelAmount
       FROM StockIn h
       JOIN Vendor v ON v.VendorId = h.VendorId
@@ -114,7 +127,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Checks a Stock In body against its order. Returns { error } or what to save.
-// Rows left at 0 are skipped. On edit, an expiry / mfg month the line already
+// Rows with no paid or free units are skipped. On edit, an expiry / mfg month the line already
 // had is kept even if it's now in the past.
 async function checkStockIn(tx, body, stockInId) {
   const inDate = text(body.inDate).slice(0, 10);
@@ -139,12 +152,15 @@ async function checkStockIn(tx, body, stockInId) {
   const raw = Array.isArray(body.lines) ? body.lines : [];
   for (const l of raw) {
     const qty = numOr(l.quantity, 0);
-    if (qty === 0) continue;
+    const free = numOr(l.freeQty, 0);
+    if (qty === 0 && free === 0) continue;
     const po = due.get(Number(l.poLineId));
     if (!po) return { error: "A line isn't on this order" };
     const name = po.ItemName;
-    if (!(qty > 0)) return { error: `${name}: Quantity must be more than 0` };
+    if (!(qty >= 0)) return { error: `${name}: Received must be 0 or more` };
+    if (!(free >= 0)) return { error: `${name}: Free Received must be 0 or more` };
     if (qty > po.Due) return { error: `${name}: only ${po.Due} still due on the order` };
+    if (free > po.FreeDue) return { error: `${name}: only ${po.FreeDue} free still due on the order` };
     const batch = text(l.batchNo);
     if (!batch) return { error: `${name}: Batch No is required` };
     if (batch.length > 50) return { error: `${name}: Batch No must be at most 50 characters` };
@@ -156,17 +172,16 @@ async function checkStockIn(tx, body, stockInId) {
     if (exp < now && exp !== old.exp) return { error: `${name}: Exp.Date can't be a past month` };
     if (mfg && mfg > now && mfg !== old.mfg) return { error: `${name}: Mf.Date can't be a future month` };
     if (mfg && exp <= mfg) return { error: `${name}: Exp.Date must be after Mf.Date` };
-    const salesPercent = numOr(l.salesPercent, 0);
+    // Sales % is no longer used (Sel.Amount comes from the MRP); it's saved as 0.
+    const salesPercent = 0;
     const discPercent = numOr(l.discPercent, 0);
-    if (!(salesPercent >= 0 && salesPercent <= 1000)) return { error: `${name}: Sales % must be 0 or more` };
     if (!(discPercent >= 0 && discPercent <= 100)) return { error: `${name}: Discount % must be between 0 and 100` };
     const rate = Number(po.Rate);
     const mrp = Number(po.MRP);
-    const sel = selAmount({ rate, salesPercent, discPercent });
-    if (sel > mrp) return { error: `${name}: Sel.Amount ${sel.toFixed(2)} is above MRP ${mrp.toFixed(2)}` };
-    lines.push({ poLineId: po.PoLineId, itemId: po.ItemId, batch, mfg: mfg ? firstDay(mfg) : null, exp: lastDay(exp), qty, rate, mrp, salesPercent, discPercent, sel });
+    const sel = selAmount({ mrp, discPercent });
+    lines.push({ poLineId: po.PoLineId, itemId: po.ItemId, batch, mfg: mfg ? firstDay(mfg) : null, exp: lastDay(exp), qty, free, rate, mrp, salesPercent, discPercent, sel });
   }
-  if (!lines.length) return { error: 'Enter a Quantity on at least one line' };
+  if (!lines.length) return { error: 'Enter a Received quantity on at least one line' };
   return { inDate, vendorId, orderId, lines };
 }
 
@@ -203,10 +218,10 @@ async function saveStockIn(req, res, stockInId) {
       await new sql.Request(tx)
         .input('id', sql.Int, id).input('poLineId', sql.Int, l.poLineId).input('itemId', sql.Int, l.itemId)
         .input('batch', sql.NVarChar(50), l.batch).input('mfg', sql.Date, l.mfg).input('exp', sql.Date, l.exp)
-        .input('qty', sql.Decimal(10, 2), l.qty).input('rate', sql.Decimal(10, 2), l.rate).input('mrp', sql.Decimal(10, 2), l.mrp)
+        .input('qty', sql.Decimal(10, 2), l.qty).input('free', sql.Decimal(10, 2), l.free).input('rate', sql.Decimal(10, 2), l.rate).input('mrp', sql.Decimal(10, 2), l.mrp)
         .input('sales', sql.Decimal(6, 2), l.salesPercent).input('disc', sql.Decimal(5, 2), l.discPercent).input('sel', sql.Decimal(10, 2), l.sel)
-        .query(`INSERT INTO StockInItem (StockInId, PoLineId, ItemId, BatchNo, MfgDate, ExpDate, Quantity, Rate, MRP, SalesPercent, DiscPercent, SelAmount)
-                VALUES (@id, @poLineId, @itemId, @batch, @mfg, @exp, @qty, @rate, @mrp, @sales, @disc, @sel)`);
+        .query(`INSERT INTO StockInItem (StockInId, PoLineId, ItemId, BatchNo, MfgDate, ExpDate, Quantity, FreeQty, Rate, MRP, SalesPercent, DiscPercent, SelAmount)
+                VALUES (@id, @poLineId, @itemId, @batch, @mfg, @exp, @qty, @free, @rate, @mrp, @sales, @disc, @sel)`);
       // Each item's selling price becomes its Sel.Amount.
       await new sql.Request(tx).input('itemId', sql.Int, l.itemId).input('sel', sql.Decimal(10, 2), l.sel)
         .query('UPDATE PharmacyItem SET SellPrice = @sel WHERE ItemId = @itemId');
@@ -232,8 +247,11 @@ router.put('/:id', (req, res) => {
   return saveStockIn(req, res, id);
 });
 
+// Only an Admin may delete a Stock In (its stock goes with it), and not once a
+// Return or a Sale has used its batches.
 router.delete('/:id', async (req, res) => {
   try {
+    if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete a Stock In' });
     const pool = await getPool();
     const locked = await lockReason(pool.request(), Number(req.params.id));
     if (locked) return res.status(400).json({ error: locked });

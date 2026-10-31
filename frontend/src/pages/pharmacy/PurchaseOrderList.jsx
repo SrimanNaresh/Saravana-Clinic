@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingCart, Search, Plus, Pencil } from 'lucide-react';
+import { ShoppingCart, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
 import { purchaseOrderApi } from '../../api/client.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 
 const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-GB');
 
 // Pharmacy > Purchase / Order > List: every order, searchable by order no,
-// vendor or item name.
+// vendor or item name. Only an Admin sees Delete (the server checks too).
 export default function PurchaseOrderList() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast, show } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -41,6 +44,17 @@ export default function PurchaseOrderList() {
     const t = setTimeout(() => load(search), search ? 350 : 0);
     return () => clearTimeout(t);
   }, [search, load]);
+
+  const remove = async (r) => {
+    if (!confirm(`Delete order ${r.OrderNo} (${r.VendorName}, ₹${money(r.TotalAmount)})?`)) return;
+    try {
+      await purchaseOrderApi.remove(r.PurchaseOrderId);
+      show(`Order ${r.OrderNo} deleted`, 'success');
+      load(search);
+    } catch (err) {
+      show(err.response?.data?.error || 'Delete failed', 'error');
+    }
+  };
 
   return (
     <div>
@@ -74,7 +88,7 @@ export default function PurchaseOrderList() {
                   <th className="px-3 py-2">Vendor</th>
                   <th className="px-3 py-2 text-right">Items</th>
                   <th className="px-3 py-2 text-right">Sum of Total</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">Edit</th>
+                  <th className="rounded-r-lg px-3 py-2 text-right">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -85,8 +99,13 @@ export default function PurchaseOrderList() {
                     <td className="px-3 py-1.5 text-slate-700">{r.VendorName}</td>
                     <td className="px-3 py-1.5 text-right text-slate-600">{r.Items}</td>
                     <td className="px-3 py-1.5 text-right font-semibold text-slate-800">{money(r.TotalAmount)}</td>
-                    <td className="px-3 py-1.5 text-right">
-                      <button type="button" className="btn-ghost px-2 py-1" title="Edit order" onClick={() => navigate('/pharmacy/purchase-order', { state: { editOrderId: r.PurchaseOrderId } })}><Pencil size={15} /></button>
+                    <td className="px-3 py-1.5">
+                      <div className="flex justify-end gap-1">
+                        <button type="button" className="btn-ghost px-2 py-1" title="Edit order" onClick={() => navigate('/pharmacy/purchase-order', { state: { editOrderId: r.PurchaseOrderId } })}><Pencil size={15} /></button>
+                        {isAdmin && (
+                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete order (Admin only)" onClick={() => remove(r)}><Trash2 size={15} /></button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

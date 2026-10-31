@@ -15,15 +15,16 @@ const numStr = (v) => (v == null || v === '' ? '' : String(Number(v)));
 
 let nextKey = 1;
 const emptyLine = () => ({
-  key: nextKey++, lineId: null, itemId: '', generic: '', manufacturer: '', hsn: '', category: '', pack: '',
-  mrp: '', disc: '', qty: '', cgst: '', sgst: '',
+  key: nextKey++, lineId: null, itemId: '', generic: '', manufacturer: '', hsn: '', category: '', pack: '', unit: '',
+  mrp: '', pRate: '', free: '', disc: '', qty: '', gst: '', cgst: '', sgst: '',
 });
 
-// A new line for an item, with its details filled from the item.
+// A new line for an item, with its details filled from the item. P.Rate
+// starts at the rate it was last ordered at (empty for a first order).
 const lineFromItem = (it) => ({
   ...emptyLine(), itemId: String(it.ItemId), generic: it.GenericName || '', manufacturer: it.ManufacturerName || '',
-  hsn: it.HSNCode || '', category: it.Category || '', pack: it.Pack || '', mrp: numStr(it.MRP),
-  cgst: numStr(it.CGSTPercent), sgst: numStr(it.SGSTPercent), qty: '1', disc: '',
+  hsn: it.HSNCode || '', category: it.Category || '', pack: it.Pack || '', unit: it.UnitName || '', mrp: numStr(it.MRP), pRate: numStr(it.LastPRate),
+  gst: sumStr(it.CGSTPercent, it.SGSTPercent), cgst: numStr(it.CGSTPercent), sgst: numStr(it.SGSTPercent), qty: '1', free: '', disc: '',
 });
 
 // The vendor's address block for the Details box.
@@ -36,13 +37,25 @@ function vendorDetails(v) {
     .filter(Boolean).join('\n');
 }
 
-const calcOf = (l) => purchaseLine({ mrp: l.mrp, discPercent: l.disc, quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst });
+// GST % as typed text from CGST + SGST ('' when neither is set).
+const sumStr = (c, s) => (c == null && s == null ? '' : String(Math.round((Number(c || 0) + Number(s || 0)) * 100) / 100));
+// Typing GST % splits it equally into CGST % and SGST %.
+const splitGst = (gst) => {
+  if (gst === '') return { gst, cgst: '', sgst: '' };
+  const half = String(Math.round((Number(gst) / 2) * 100) / 100);
+  return { gst, cgst: half, sgst: half };
+};
+
+const calcOf = (l) => purchaseLine({ pRate: l.pRate, discPercent: l.disc, quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst });
 
 // A line's problem on screen (the server checks the same), or null.
 function lineProblem(l) {
   if (!l.itemId) return null;
   if (!(Number(l.qty) > 0)) return 'Quantity must be more than 0';
   if (!(Number(l.mrp) > 0)) return 'MRP must be more than 0';
+  if (!(Number(l.pRate) > 0)) return 'P.Rate must be more than 0';
+  if (Number(l.pRate) > Number(l.mrp)) return `P.Rate can't be above MRP ${money(l.mrp)}`;
+  if (!(Number(l.free || 0) >= 0)) return 'Free must be 0 or more';
   const d = Number(l.disc || 0);
   if (!(d >= 0 && d <= 100)) return 'Disc % must be 0–100';
   const c = Number(l.cgst || 0);
@@ -71,11 +84,18 @@ export default function PurchaseOrder() {
   const [newVendor, setNewVendor] = useState(null);
   // Bulk add panel: null or { search, category, manufacturer, ticked: Set }.
   const [bulk, setBulk] = useState(null);
+  // Old Price: { itemId: last net rate (P.Rate less Disc %) from the chosen vendor }.
+  const [lastRates, setLastRates] = useState({});
 
   useEffect(() => {
     itemMasterApi.list({ status: 'Active' }).then(setItems).catch(() => show('Failed to load items', 'error'));
     vendorApi.list().then(setVendors).catch(() => show('Failed to load vendors', 'error'));
   }, [show]);
+
+  useEffect(() => {
+    if (!vendorId) { setLastRates({}); return; }
+    purchaseOrderApi.lastRates(vendorId, editing?.id).then(setLastRates).catch(() => setLastRates({}));
+  }, [vendorId, editing?.id]);
 
   const itemById = useMemo(() => new Map(items.map((i) => [String(i.ItemId), i])), [items]);
   const itemOptions = useMemo(() => items.map((i) => ({ value: String(i.ItemId), label: i.Name })), [items]);
@@ -97,8 +117,9 @@ export default function PurchaseOrder() {
       setOrderDate(String(o.OrderDate).slice(0, 10));
       setLines(o.lines.map((l) => ({
         ...emptyLine(), lineId: l.LineId, itemId: String(l.ItemId), generic: l.GenericName || '', manufacturer: l.Manufacturer || '',
-        hsn: l.HSNCode || '', category: l.Category || '', pack: l.Pack || '', mrp: numStr(l.MRP), disc: numStr(l.DiscPercent),
-        qty: numStr(l.Quantity), cgst: numStr(l.CGSTPercent), sgst: numStr(l.SGSTPercent),
+        hsn: l.HSNCode || '', category: l.Category || '', pack: l.Pack || '', unit: l.Unit || '', mrp: numStr(l.MRP), pRate: numStr(l.PRate),
+        free: Number(l.FreeQty) ? numStr(l.FreeQty) : '', disc: numStr(l.DiscPercent),
+        qty: numStr(l.Quantity), gst: sumStr(l.CGSTPercent, l.SGSTPercent), cgst: numStr(l.CGSTPercent), sgst: numStr(l.SGSTPercent),
       })));
     }).catch(() => show('Failed to load the order', 'error'));
   }, [location.state, location.pathname, navigate, show]);
@@ -166,7 +187,7 @@ export default function PurchaseOrder() {
 
   const filled = lines.filter((l) => l.itemId);
   const problems = new Map(filled.map((l) => [l.key, lineProblem(l)]).filter(([, p]) => p));
-  const total = purchaseTotal(filled.map((l) => ({ mrp: l.mrp, discPercent: l.disc, quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst })));
+  const total = purchaseTotal(filled.map((l) => ({ pRate: l.pRate, discPercent: l.disc, quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst })));
 
   const reset = () => {
     setEditing(null); setVendorId(''); setDetails(''); setShowDetails(false); setOrderDate(today()); setLines([emptyLine()]);
@@ -183,7 +204,8 @@ export default function PurchaseOrder() {
       const body = {
         vendorId: Number(vendorId), orderDate, vendorDetails: details,
         lines: filled.map((l) => ({
-          lineId: l.lineId, itemId: Number(l.itemId), mrp: l.mrp, discPercent: l.disc, quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst,
+          lineId: l.lineId, itemId: Number(l.itemId), mrp: l.mrp, pRate: l.pRate, freeQty: l.free, discPercent: l.disc,
+          quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst,
         })),
       };
       if (editing) {
@@ -201,11 +223,15 @@ export default function PurchaseOrder() {
     }
   };
 
-  const cell = 'border border-ink-200 px-1 py-0.5';
-  const box = 'w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-[13px] focus:border-brand-400 focus:bg-white focus:outline-none';
+  const cell = 'border border-ink-200 px-1 py-0.5 break-words';
+  // Headings centred both ways (Item Name stays left); one line on wide
+  // screens, smaller and allowed to wrap on narrower ones.
+  const hd = 'border border-ink-200 px-0.5 py-1.5 text-center align-middle text-[10px] xl:text-[11px] xl:whitespace-nowrap';
+  const box = 'w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] focus:border-brand-400 focus:bg-white focus:outline-none';
   const numBox = `${box} no-spin text-right`;
   const opt = 'bg-amber-50 text-amber-900';
-  const optCols = showOptional ? 4 : 0;
+  // The › arrow swaps the four GST columns for the three item-detail columns.
+  const optCols = showOptional ? 3 - 4 : 0;
 
   return (
     <div>
@@ -316,31 +342,41 @@ export default function PurchaseOrder() {
           )}
 
           <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[940px] border-collapse text-left text-[13px]" {...gridKeys}>
+            {/* Fixed layout: each column has a share of the width, so the table fits the
+                screen without scrolling; opening the optional columns lets it scroll. */}
+            <table className={`w-full table-fixed border-collapse text-left text-[12px] `} {...gridKeys}>
               <thead>
-                <tr className="bg-brand-50 font-bold text-brand-700">
-                  <th className={`${cell} w-8 text-center`}>#</th>
-                  <th className={`${cell} min-w-[200px]`}>
+                <tr className="bg-brand-50 text-[11px] font-bold leading-tight text-brand-700">
+                  <th className={`${hd} w-[2.5%]`}>#</th>
+                  <th className={`${hd} w-[17%] !text-left`}>
                     <div className="flex items-center justify-between">
                       Item Name
-                      <button type="button" className="rounded px-1 text-brand-600 hover:bg-white" title={showOptional ? 'Hide Generic, Manufacturer, HSN, Category' : 'Show Generic, Manufacturer, HSN, Category'} onClick={() => setShowOptional((s) => !s)}>
+                      <button type="button" className="rounded px-1 text-brand-600 hover:bg-white" title={showOptional ? 'Show the GST columns again' : 'Show Generic, Manufacturer, HSN in place of the GST columns'} onClick={() => setShowOptional((s) => !s)}>
                         {showOptional ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
                       </button>
                     </div>
                   </th>
-                  {showOptional && ['Generic Name', 'Manufacturer', 'HSN Code', 'Category'].map((h) => <th key={h} className={`${cell} ${opt}`}>{h}</th>)}
-                  <th className={`${cell} w-16`}>Pack</th>
-                  <th className={`${cell} w-24 min-w-[5.5rem] text-right`}>MRP</th>
-                  <th className={`${cell} w-20 text-right`}>Disc %</th>
-                  <th className={`${cell} w-20 text-right`}>Cur.Rate</th>
-                  <th className={`${cell} w-20 text-right`}>Quantity</th>
-                  <th className={`${cell} w-24 text-right`}>Amount</th>
-                  <th className={`${cell} w-14 text-right`}>GST %</th>
-                  <th className={`${cell} w-16 text-right`}>CGST %</th>
-                  <th className={`${cell} w-16 text-right`}>SGST %</th>
-                  <th className={`${cell} w-20 text-right`}>GST Amount</th>
-                  <th className={`${cell} w-24 text-right`}>Total Amount</th>
-                  <th className={`${cell} w-14`} />
+                  {showOptional && [['Generic', 'w-[6%]'], ['Manufacturer', 'w-[7.5%]'], ['HSN', 'w-[4%]']].map(([h, w]) => <th key={h} className={`${hd} ${w} ${opt}`}>{h}</th>)}
+                  <th className={`${hd} w-[7%]`} title="Category from Item Master">Category</th>
+                  <th className={`${hd} w-[4.5%]`}>Pack</th>
+                  <th className={`${hd} w-[4.5%]`} title="Type / Unit from Item Master">Unit</th>
+                  <th className={`${hd} w-[5.5%]`}>MRP</th>
+                  <th className={`${hd} w-[5.5%]`} title="Last rate from this vendor, after its discount (P.Rate less Disc %); 0 if never ordered from them">Old Price</th>
+                  <th className={`${hd} w-[5.5%]`} title="Purchase rate — Disc % applies to it">P.Rate</th>
+                  <th className={`${hd} w-[4%]`} title="Free units — not charged, received with the rest">Free</th>
+                  <th className={`${hd} w-[4%]`}>Disc%</th>
+                  <th className={`${hd} w-[5%]`}>Qty</th>
+                  <th className={`${hd} w-[6%]`}>Amount</th>
+                  {!showOptional && (
+                    <>
+                      <th className={`${hd} w-[4%]`}>GST%</th>
+                      <th className={`${hd} w-[4.5%]`}>CGST%</th>
+                      <th className={`${hd} w-[4.5%]`}>SGST%</th>
+                      <th className={`${hd} w-[5.5%]`}>GST Amt</th>
+                    </>
+                  )}
+                  <th className={`${hd} w-[6.5%]`}>Total</th>
+                  <th className={`${hd} w-[4%]`} />
                 </tr>
               </thead>
               <tbody>
@@ -355,22 +391,30 @@ export default function PurchaseOrder() {
                         <SearchPick className={box} data-r={r} data-c={0} placeholder="Search item..." options={itemOptions} value={l.itemId} onChange={(v) => pickItem(l.key, v)} />
                         {bad && <p className="px-1.5 text-[11px] text-red-600">{bad}</p>}
                       </td>
-                      {showOptional && [l.generic, l.manufacturer, l.hsn, l.category].map((v, i) => <td key={i} className={`${cell} ${opt} px-1.5`}>{v}</td>)}
+                      {showOptional && [l.generic, l.manufacturer, l.hsn].map((v, i) => <td key={i} className={`${cell} ${opt} px-1.5`}>{v}</td>)}
+                      <td className={`${cell} px-1.5`}>{l.category}</td>
                       <td className={`${cell} px-1.5`}>{l.pack}</td>
+                      <td className={`${cell} px-1.5`}>{l.unit}</td>
                       <td className={cell}><input type="number" min="0" step="0.01" data-r={r} data-c={1} className={numBox} value={l.mrp} disabled={!l.itemId} onChange={(e) => setLine(l.key, { mrp: e.target.value })} /></td>
-                      <td className={cell}><input type="number" min="0" max="100" step="0.01" data-r={r} data-c={2} className={numBox} value={l.disc} disabled={!l.itemId} onChange={(e) => setLine(l.key, { disc: e.target.value })} /></td>
-                      <td className={`${cell} ${ro}`}>{l.itemId ? money(c.rate) : ''}</td>
-                      <td className={cell}><input type="number" min="0" step="any" data-r={r} data-c={3} className={numBox} value={l.qty} disabled={!l.itemId} onChange={(e) => setLine(l.key, { qty: e.target.value })} /></td>
+                      <td className={`${cell} ${ro}`}>{l.itemId ? money(lastRates[l.itemId] ?? 0) : ''}</td>
+                      <td className={cell}><input type="number" min="0" step="0.01" data-r={r} data-c={2} className={`${numBox} ${Number(l.pRate) > Number(l.mrp) ? 'border-red-400 bg-red-50 text-red-700' : ''}`} value={l.pRate} disabled={!l.itemId} onChange={(e) => setLine(l.key, { pRate: e.target.value })} /></td>
+                      <td className={cell}><input type="number" min="0" step="any" data-r={r} data-c={3} className={numBox} value={l.free} disabled={!l.itemId} onChange={(e) => setLine(l.key, { free: e.target.value })} /></td>
+                      <td className={cell}><input type="number" min="0" max="100" step="0.01" data-r={r} data-c={4} className={numBox} value={l.disc} disabled={!l.itemId} onChange={(e) => setLine(l.key, { disc: e.target.value })} /></td>
+                      <td className={cell}><input type="number" min="0" step="any" data-r={r} data-c={5} className={numBox} value={l.qty} disabled={!l.itemId} onChange={(e) => setLine(l.key, { qty: e.target.value })} /></td>
                       <td className={`${cell} ${ro}`}>{l.itemId ? money(c.amount) : ''}</td>
-                      <td className={`${cell} ${ro}`}>{l.itemId ? c.gstPercent : ''}</td>
-                      <td className={cell}><input type="number" min="0" max={MAX_GST} step="0.01" data-r={r} data-c={4} className={numBox} value={l.cgst} disabled={!l.itemId} onChange={(e) => setLine(l.key, { cgst: e.target.value })} /></td>
-                      <td className={cell}><input type="number" min="0" max={MAX_GST} step="0.01" data-r={r} data-c={5} className={numBox} value={l.sgst} disabled={!l.itemId} onChange={(e) => setLine(l.key, { sgst: e.target.value })} /></td>
-                      <td className={`${cell} ${ro}`}>{l.itemId ? money(c.gstAmount) : ''}</td>
+                      {!showOptional && (
+                        <>
+                          <td className={cell}><input type="number" min="0" max={MAX_GST} step="0.01" data-r={r} data-c={6} className={numBox} value={l.gst} disabled={!l.itemId} title="Splits equally into CGST % and SGST %" onChange={(e) => setLine(l.key, splitGst(e.target.value))} /></td>
+                          <td className={cell}><input type="number" min="0" max={MAX_GST} step="0.01" data-r={r} data-c={7} className={numBox} value={l.cgst} disabled={!l.itemId} onChange={(e) => setLine(l.key, { cgst: e.target.value, gst: sumStr(e.target.value || null, l.sgst || null) })} /></td>
+                          <td className={cell}><input type="number" min="0" max={MAX_GST} step="0.01" data-r={r} data-c={8} className={numBox} value={l.sgst} disabled={!l.itemId} onChange={(e) => setLine(l.key, { sgst: e.target.value, gst: sumStr(l.cgst || null, e.target.value || null) })} /></td>
+                          <td className={`${cell} ${ro}`}>{l.itemId ? money(c.gstAmount) : ''}</td>
+                        </>
+                      )}
                       <td className={`${cell} ${ro} font-semibold text-ink-800`}>{l.itemId ? money(c.total) : ''}</td>
                       <td className={cell}>
-                        <div className="flex justify-center gap-0.5">
-                          <button type="button" className="rounded p-1 text-brand-600 hover:bg-brand-50" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={14} /></button>
-                          <button type="button" className="rounded p-1 text-red-500 hover:bg-red-50" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>
+                        <div className="flex justify-center">
+                          <button type="button" className="rounded p-0.5 text-brand-600 hover:bg-brand-50" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={13} /></button>
+                          <button type="button" className="rounded p-0.5 text-red-500 hover:bg-red-50" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -379,7 +423,7 @@ export default function PurchaseOrder() {
               </tbody>
               <tfoot>
                 <tr className="bg-ink-50 font-semibold">
-                  <td className={`${cell} px-2 text-right`} colSpan={12 + optCols}>Sum of Total</td>
+                  <td className={`${cell} px-2 text-right`} colSpan={16 + optCols}>Sum of Total</td>
                   <td className={`${cell} px-1.5 text-right text-ink-900`}>{money(total)}</td>
                   <td className={cell} />
                 </tr>

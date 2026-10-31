@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { PackagePlus, Search, Plus, Pencil, ChevronRight, ChevronDown } from 'lucide-react';
+import { PackagePlus, Search, Plus, Pencil, Trash2, ChevronRight, ChevronDown } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
 import { stockInApi } from '../../api/client.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { round2 } from '../../utils/purchaseCalc.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -11,18 +12,22 @@ const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDig
 const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-GB');
 const expLabel = (iso) => (iso ? `${MONTHS[Number(String(iso).slice(5, 7)) - 1]} ${String(iso).slice(0, 4)}` : '-');
 
-// A line's amounts, each with its single-quantity amount:
-//   Buy = Qty x Cur.Rate; Sale = Qty x (Cur.Rate + Sales %);
+// A line's amounts, each with its single-quantity amount. Qty counts the free
+// units too; only the paid ones are bought:
+//   Buy = Paid Qty x Cur.Rate; Sale = Qty x MRP;
 //   Discount = Discount % of Sale; Net Sale = Qty x Sel.Amount.
 function amounts(l) {
-  const qty = Number(l.Quantity);
+  const paid = Number(l.Quantity);
+  const free = Number(l.FreeQty || 0);
+  const qty = paid + free;
   const rate = Number(l.Rate);
-  const saleUnit = round2(rate * (1 + Number(l.SalesPercent) / 100));
+  const saleUnit = Number(l.MRP);
   const discUnit = round2(saleUnit * (Number(l.DiscPercent) / 100));
   const sel = Number(l.SelAmount);
   return {
     qty,
-    buy: [round2(qty * rate), rate],
+    free,
+    buy: [round2(paid * rate), rate],
     sale: [round2(qty * saleUnit), saleUnit],
     disc: [round2(qty * discUnit), discUnit],
     net: [round2(qty * sel), sel],
@@ -47,11 +52,14 @@ const AMOUNT_HEADS = ['Buy Amount', 'Sale Amount', 'Discount Amount', 'Net Sale 
 
 // Pharmacy > Stock In > List: every Stock In line, item wise (each item's
 // batches) or date wise (each day's Stock Ins), with the totals of all lines
-// the search matches.
+// the search matches. Only an Admin sees Delete, which removes a whole Stock
+// In (the server checks the role, and refuses once a Sale or Return used it).
 export default function StockInList() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast, show } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
   const [lines, setLines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -92,6 +100,23 @@ export default function StockInList() {
     return [...m.entries()];
   }, [lines]);
 
+  const remove = async (stockInId) => {
+    const ls = lines.filter((l) => l.StockInId === stockInId);
+    const first = ls[0];
+    const items = [...new Set(ls.map((l) => l.ItemName))].join(', ');
+    if (!confirm(`Delete Stock In ${first.StockInNo} (${first.VendorName})?\n\nAll ${ls.length} batch line(s) go, and their stock is taken off: ${items}.`)) return;
+    try {
+      await stockInApi.remove(stockInId);
+      show(`${first.StockInNo} deleted`, 'success');
+      load(search);
+    } catch (err) {
+      show(err.response?.data?.error || 'Delete failed', 'error');
+    }
+  };
+  const binButton = (stockInId, no) => (
+    <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title={`Delete ${no} (Admin only)`} onClick={() => remove(stockInId)}><Trash2 size={15} /></button>
+  );
+
   const toggle = (key) => setOpen((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   const cell = 'border border-ink-200 px-2 py-1';
@@ -109,7 +134,10 @@ export default function StockInList() {
     const a = amounts(l);
     return (
       <>
-        <td className={`${cell} ${r}`}>{a.qty}</td>
+        <td className={`${cell} ${r}`}>
+          {a.qty}
+          {a.free > 0 && <div className="text-[11px] text-ink-400">incl. {a.free} free</div>}
+        </td>
         {[a.buy, a.sale, a.disc, a.net].map((p, i) => <td key={i} className={`${cell} ${r}`}><Amt pair={p} /></td>)}
       </>
     );
@@ -156,12 +184,13 @@ export default function StockInList() {
                     <tr className="bg-brand-50 font-bold text-brand-700">
                       <th className={cell}>Item / Batch No</th><th className={cell}>Exp</th><th className={cell}>Stock In No</th><th className={cell}>Vendor</th>
                       <th className={`${cell} ${r}`}>Quantity</th>{AMOUNT_HEADS.map((h) => <th key={h} className={`${cell} ${r}`}>{h}</th>)}
+                      {isAdmin && <th className={`${cell} w-14 text-center`}>Delete</th>}
                     </tr>
                   ) : (
                     <tr className="bg-brand-50 font-bold text-brand-700">
                       <th className={cell}>Stock In No · Vendor</th><th className={cell}>Item</th><th className={cell}>Batch No</th><th className={cell}>Exp</th>
                       <th className={`${cell} ${r}`}>Quantity</th>{AMOUNT_HEADS.map((h) => <th key={h} className={`${cell} ${r}`}>{h}</th>)}
-                      <th className={`${cell} w-14 text-center`}>Edit</th>
+                      <th className={`${cell} ${isAdmin ? 'w-24' : 'w-14'} text-center`}>{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                     </tr>
                   )}
                 </thead>
@@ -177,6 +206,7 @@ export default function StockInList() {
                             {g.name} <span className="font-normal text-ink-400">· {g.lines.length} batch(es)</span>
                           </td>
                           {totalsCells(t)}
+                          {isAdmin && <td className={cell} />}
                         </tr>
                         {isOpen && g.lines.map((l) => (
                           <tr key={l.LineId}>
@@ -185,6 +215,7 @@ export default function StockInList() {
                             <td className={`${cell} text-brand-700`} title={dateLabel(l.InDate)}>{l.StockInNo}</td>
                             <td className={cell}>{l.VendorName}</td>
                             {amountCells(l)}
+                            {isAdmin && <td className={`${cell} text-center`}>{binButton(l.StockInId, l.StockInNo)}</td>}
                           </tr>
                         ))}
                       </Fragment>
@@ -215,7 +246,10 @@ export default function StockInList() {
                             {amountCells(l)}
                             {k === 0 && (
                               <td className={`${cell} text-center align-middle`} rowSpan={ls.length}>
-                                <button type="button" className="btn-ghost px-2 py-1" title={`Edit ${l.StockInNo}`} onClick={() => navigate('/pharmacy/stock-in', { state: { editStockInId: sid } })}><Pencil size={15} /></button>
+                                <div className="flex justify-center gap-1">
+                                  <button type="button" className="btn-ghost px-2 py-1" title={`Edit ${l.StockInNo}`} onClick={() => navigate('/pharmacy/stock-in', { state: { editStockInId: sid } })}><Pencil size={15} /></button>
+                                  {isAdmin && binButton(sid, l.StockInNo)}
+                                </div>
                               </td>
                             )}
                           </tr>
@@ -228,7 +262,7 @@ export default function StockInList() {
                   <tr className="bg-ink-800 font-semibold text-white">
                     <td className={cell} colSpan={4}>Total</td>
                     {totalsCells(total)}
-                    {tab === 'date' && <td className={cell} />}
+                    {(tab === 'date' || isAdmin) && <td className={cell} />}
                   </tr>
                 </tfoot>
               </table>

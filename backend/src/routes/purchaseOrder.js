@@ -40,6 +40,28 @@ router.get('/', async (req, res) => {
   }
 });
 
+// The Old Price column: each item's rate on this vendor's latest earlier order,
+// net of its discount (P.Rate less Disc %, the line's Rate), as { itemId: rate }.
+// ?excludeOrderId= leaves out the order being edited; items this vendor never
+// supplied aren't in it.
+router.get('/last-rates', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('vendorId', sql.Int, Number(req.query.vendorId) || 0)
+      .input('exclude', sql.Int, Number(req.query.excludeOrderId) || null)
+      .query(`
+        SELECT ItemId, Rate FROM (
+          SELECT l.ItemId, l.Rate, ROW_NUMBER() OVER (PARTITION BY l.ItemId ORDER BY h.OrderDate DESC, h.PurchaseOrderId DESC, l.LineId DESC) AS rn
+          FROM PurchaseOrderItem l JOIN PurchaseOrder h ON h.PurchaseOrderId = l.PurchaseOrderId AND h.IsActive = 1
+          WHERE h.VendorId = @vendorId AND (@exclude IS NULL OR h.PurchaseOrderId <> @exclude)
+        ) x WHERE rn = 1`);
+    res.json(Object.fromEntries(r.recordset.map((x) => [x.ItemId, Number(x.Rate)])));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const pool = await getPool();
@@ -49,8 +71,12 @@ router.get('/:id', async (req, res) => {
       WHERE h.PurchaseOrderId = @id AND h.IsActive = 1`);
     if (!head.recordset.length) return res.status(404).json({ error: 'Order not found' });
     const lines = await pool.request().input('id', sql.Int, req.params.id)
-      .query('SELECT * FROM PurchaseOrderItem WHERE PurchaseOrderId = @id ORDER BY LineId');
-    res.json({ ...head.recordset[0], lines: lines.recordset, locked: await receivedLock(pool.request(), Number(req.params.id)) });
+      .query(`SELECT l.*, ISNULL(l.PRate, l.MRP) AS PRateShown, ISNULL(l.Unit, u.Name) AS UnitShown
+              FROM PurchaseOrderItem l
+              LEFT JOIN PharmacyItem i ON i.ItemId = l.ItemId LEFT JOIN UnitMaster u ON u.UnitId = i.UnitId
+              WHERE l.PurchaseOrderId = @id ORDER BY l.LineId`);
+    // Lines saved before P.Rate / Unit existed show the MRP and the item's current unit.
+    res.json({ ...head.recordset[0], lines: lines.recordset.map(({ PRateShown, UnitShown, ...l }) => ({ ...l, PRate: PRateShown, Unit: UnitShown })), locked: await receivedLock(pool.request(), Number(req.params.id)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -60,7 +86,7 @@ const text = (v) => (v == null ? '' : String(v).trim());
 const numOr = (v, d) => (text(v) === '' ? d : Number(v));
 
 // Checks an order body. Returns { error } or the header and lines to save.
-// Item details (name, generic, manufacturer, HSN, category, pack) are copied
+// Item details (name, generic, manufacturer, HSN, category, pack, unit) are copied
 // from the item on file; a line already on the order keeps the copy it has.
 async function checkOrder(pool, body, orderId) {
   const orderDate = text(body.orderDate).slice(0, 10);
@@ -79,8 +105,9 @@ async function checkOrder(pool, body, orderId) {
   const items = new Map();
   if (ids.length) {
     const r = await pool.request().input('ids', sql.NVarChar(sql.MAX), ids.join(',')).query(`
-      SELECT i.ItemId, i.Name, g.Name AS GenericName, m.Name AS Manufacturer, i.HSNCode, i.Category, i.Pack
+      SELECT i.ItemId, i.Name, g.Name AS GenericName, m.Name AS Manufacturer, i.HSNCode, i.Category, i.Pack, un.Name AS Unit
       FROM PharmacyItem i
+      LEFT JOIN UnitMaster un ON un.UnitId = i.UnitId
       LEFT JOIN GenericNameMaster g ON g.GenericNameId = i.GenericNameId
       LEFT JOIN ManufacturerMaster m ON m.ManufacturerId = i.ManufacturerId
       WHERE i.IsActive = 1 AND i.ItemId IN (SELECT CAST(value AS INT) FROM STRING_SPLIT(@ids, ','))`);
@@ -104,17 +131,22 @@ async function checkOrder(pool, body, orderId) {
     if (!(qty > 0)) return { error: `${row} (${name}): Quantity must be more than 0` };
     const mrp = Number(l.mrp);
     if (!(mrp > 0)) return { error: `${row} (${name}): MRP must be more than 0` };
+    const pRate = Number(l.pRate);
+    if (!(pRate > 0)) return { error: `${row} (${name}): P.Rate must be more than 0` };
+    if (pRate > mrp) return { error: `${row} (${name}): P.Rate ${pRate.toFixed(2)} can't be above MRP ${mrp.toFixed(2)}` };
+    const free = numOr(l.freeQty, 0);
+    if (!(free >= 0)) return { error: `${row} (${name}): Free must be 0 or more` };
     const disc = numOr(l.discPercent, 0);
     if (!(disc >= 0 && disc <= 100)) return { error: `${row} (${name}): Disc % must be between 0 and 100` };
     const cgst = numOr(l.cgstPercent, 0);
     const sgst = numOr(l.sgstPercent, 0);
     if (!(cgst >= 0 && cgst <= MAX_GST) || !(sgst >= 0 && sgst <= MAX_GST)) return { error: `${row} (${name}): CGST % and SGST % must be between 0 and ${MAX_GST}` };
     if (cgst + sgst > MAX_GST) return { error: `${row} (${name}): CGST % + SGST % can't be more than ${MAX_GST}` };
-    const calc = purchaseLine({ mrp, discPercent: disc, quantity: qty, cgstPercent: cgst, sgstPercent: sgst });
+    const calc = purchaseLine({ pRate, discPercent: disc, quantity: qty, cgstPercent: cgst, sgstPercent: sgst });
     const copy = keep && keep.ItemId === item.ItemId
-      ? { name: keep.ItemName, generic: keep.GenericName, manufacturer: keep.Manufacturer, hsn: keep.HSNCode, category: keep.Category, pack: keep.Pack }
-      : { name: item.Name, generic: item.GenericName, manufacturer: item.Manufacturer, hsn: item.HSNCode, category: item.Category, pack: item.Pack };
-    lines.push({ itemId: item.ItemId, ...copy, mrp, disc, qty, cgst, sgst, ...calc });
+      ? { name: keep.ItemName, generic: keep.GenericName, manufacturer: keep.Manufacturer, hsn: keep.HSNCode, category: keep.Category, pack: keep.Pack, unit: keep.Unit ?? item.Unit }
+      : { name: item.Name, generic: item.GenericName, manufacturer: item.Manufacturer, hsn: item.HSNCode, category: item.Category, pack: item.Pack, unit: item.Unit };
+    lines.push({ itemId: item.ItemId, ...copy, mrp, pRate, free, disc, qty, cgst, sgst, ...calc });
   }
   const total = round2(lines.reduce((s, l) => s + l.total, 0));
   return { orderDate, vendorId, vendorDetails, lines, total };
@@ -131,7 +163,10 @@ async function insertLines(tx, orderId, lines) {
       .input('hsn', sql.NVarChar(30), l.hsn)
       .input('category', sql.NVarChar(100), l.category)
       .input('pack', sql.NVarChar(50), l.pack)
+      .input('unit', sql.NVarChar(50), l.unit)
       .input('mrp', sql.Decimal(10, 2), l.mrp)
+      .input('pRate', sql.Decimal(10, 2), l.pRate)
+      .input('free', sql.Decimal(10, 2), l.free)
       .input('disc', sql.Decimal(5, 2), l.disc)
       .input('rate', sql.Decimal(10, 2), l.rate)
       .input('qty', sql.Decimal(10, 2), l.qty)
@@ -142,10 +177,10 @@ async function insertLines(tx, orderId, lines) {
       .input('gstAmount', sql.Decimal(12, 2), l.gstAmount)
       .input('total', sql.Decimal(12, 2), l.total)
       .query(`
-        INSERT INTO PurchaseOrderItem (PurchaseOrderId, ItemId, ItemName, GenericName, Manufacturer, HSNCode, Category, Pack,
-                                       MRP, DiscPercent, Rate, Quantity, Amount, CGSTPercent, SGSTPercent, GSTPercent, GSTAmount, Total)
-        VALUES (@orderId, @itemId, @name, @generic, @manufacturer, @hsn, @category, @pack,
-                @mrp, @disc, @rate, @qty, @amount, @cgst, @sgst, @gst, @gstAmount, @total)`);
+        INSERT INTO PurchaseOrderItem (PurchaseOrderId, ItemId, ItemName, GenericName, Manufacturer, HSNCode, Category, Pack, Unit,
+                                       MRP, PRate, FreeQty, DiscPercent, Rate, Quantity, Amount, CGSTPercent, SGSTPercent, GSTPercent, GSTAmount, Total)
+        VALUES (@orderId, @itemId, @name, @generic, @manufacturer, @hsn, @category, @pack, @unit,
+                @mrp, @pRate, @free, @disc, @rate, @qty, @amount, @cgst, @sgst, @gst, @gstAmount, @total)`);
   }
 }
 
@@ -198,8 +233,10 @@ router.put('/:id', (req, res) => {
   return saveOrder(req, res, id);
 });
 
+// Only an Admin may delete an order, and not once goods have come in against it.
 router.delete('/:id', async (req, res) => {
   try {
+    if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete an order' });
     const pool = await getPool();
     const locked = await receivedLock(pool.request(), Number(req.params.id));
     if (locked) return res.status(400).json({ error: locked });

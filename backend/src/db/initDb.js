@@ -595,6 +595,18 @@ IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Batch' AND Object_ID=Object
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='ExpiryDate' AND Object_ID=Object_ID('SalesBillingItem'))
     ALTER TABLE SalesBillingItem ADD ExpiryDate DATE NULL;
 
+-- Sales by Pack or by Unit (a single piece). Quantity stays in packs (stock is
+-- counted in packs), so it needs more decimals: 5 units of a 15's pack is
+-- 0.3333 pack. SaleUnit / UnitQty / PackSize record what was typed.
+IF EXISTS (SELECT * FROM sys.columns WHERE Name='Quantity' AND Object_ID=Object_ID('SalesBillingItem') AND scale < 4)
+    ALTER TABLE SalesBillingItem ALTER COLUMN Quantity DECIMAL(12,4) NOT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SaleUnit' AND Object_ID=Object_ID('SalesBillingItem'))
+    ALTER TABLE SalesBillingItem ADD SaleUnit NVARCHAR(10) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='UnitQty' AND Object_ID=Object_ID('SalesBillingItem'))
+    ALTER TABLE SalesBillingItem ADD UnitQty DECIMAL(10,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='PackSize' AND Object_ID=Object_ID('SalesBillingItem'))
+    ALTER TABLE SalesBillingItem ADD PackSize INT NULL;
+
 -- Sales (counter sale): the customer's mobile and who saved the bill.
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='MobileNo' AND Object_ID=Object_ID('SalesBilling'))
     ALTER TABLE SalesBilling ADD MobileNo NVARCHAR(20) NULL;
@@ -691,6 +703,17 @@ CREATE TABLE PurchaseOrderItem (
     CONSTRAINT FK_PurchaseOrderItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
 );
 
+-- Purchase / Order lines: the vendor's purchase rate (Disc % applies to it)
+-- and free units (not charged; Stock In expects Quantity + Free). Lines saved
+-- before these columns used MRP as the rate.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='PRate' AND Object_ID=Object_ID('PurchaseOrderItem'))
+    ALTER TABLE PurchaseOrderItem ADD PRate DECIMAL(10,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='FreeQty' AND Object_ID=Object_ID('PurchaseOrderItem'))
+    ALTER TABLE PurchaseOrderItem ADD FreeQty DECIMAL(10,2) NOT NULL DEFAULT 0;
+-- The item's Type / Unit, copied onto the line like its other details.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Unit' AND Object_ID=Object_ID('PurchaseOrderItem'))
+    ALTER TABLE PurchaseOrderItem ADD Unit NVARCHAR(50) NULL;
+
 -- Pharmacy > Stock In: goods received against a Purchase Order, batch by
 -- batch. Adds stock (read from these rows) and sets each item's selling
 -- price to the line's SelAmount. MfgDate is the first and ExpDate the last
@@ -726,6 +749,11 @@ CREATE TABLE StockInItem (
     CONSTRAINT FK_StockInItem_PoLine FOREIGN KEY (PoLineId) REFERENCES PurchaseOrderItem(LineId),
     CONSTRAINT FK_StockInItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
 );
+
+-- Free units received on a Stock In line (Quantity is the paid units). Both
+-- go into stock; only Quantity is charged.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='FreeQty' AND Object_ID=Object_ID('StockInItem'))
+    ALTER TABLE StockInItem ADD FreeQty DECIMAL(10,2) NOT NULL DEFAULT 0;
 
 -- Pharmacy > Return: goods sent back to the vendor from one Stock In.
 -- Lowers stock (read from these rows). Batch and dates are copied from the

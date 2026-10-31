@@ -84,13 +84,17 @@ router.get('/stock/:itemId/history', async (req, res) => {
 // (YYYY-MM-DD, either may be left out).
 // Stock In: Amount = Qty x Cur.Rate, GST from its order line's CGST + SGST %.
 // Return: Amount = Qty x Cur.Rate, GST % of the Stock In line it came from.
+// Free units aren't paid for: a Stock In charges only its paid Quantity, and
+// a return is credited at the Stock In line's rate spread over its paid +
+// free units (the returned units may have been free ones).
 // The older Stock Inward entries and Purchase Returns are included too: an
 // inward's Amount is Qty x price less Discount %; an old return's Amount
 // already includes GST, which is split out by its GST %.
 const DOCS = `
   SELECT h.VendorId, 'stock-in' AS Type, h.StockInId AS DocId, ${docNoSql('SI', 'h.StockInId')} AS DocNo,
          h.InDate AS DocDate, ${docNoSql('PO', 'h.PurchaseOrderId')} AS Against,
-         i.Name AS ItemName, l.Quantity AS Qty, ROUND(l.Quantity * l.Rate, 2) AS Amount,
+         i.Name AS ItemName, l.Quantity AS Qty,
+         ROUND(l.Quantity * l.Rate, 2) AS Amount,
          pol.CGSTPercent + pol.SGSTPercent AS GSTPercent
   FROM StockInItem l
   JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
@@ -99,7 +103,7 @@ const DOCS = `
   UNION ALL
   SELECT h.VendorId, 'return', h.StockReturnId, ${docNoSql('RT', 'h.StockReturnId')},
          h.ReturnDate, ${docNoSql('SI', 'h.StockInId')},
-         i.Name, l.Quantity, ROUND(l.Quantity * l.Rate, 2),
+         i.Name, l.Quantity, ROUND(l.Quantity * l.Rate * sl.Quantity / (sl.Quantity + sl.FreeQty), 2),
          pol.CGSTPercent + pol.SGSTPercent
   FROM StockReturnItem l
   JOIN StockReturn h ON h.StockReturnId = l.StockReturnId AND h.IsActive = 1

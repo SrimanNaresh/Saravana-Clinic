@@ -2,14 +2,18 @@ import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { batchStock } from '../utils/batchStock.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
+import { packSize } from '../utils/purchaseCalc.js';
 
-// Pharmacy > Sales: counter sales, each line sold from one batch. Stock is
-// never stored here: a batch's stock is worked out from what was received,
+// Pharmacy > Sales: counter sales, each line sold from one batch, by the Pack
+// or by the Unit (one piece; price and quantity per piece). Stock is never
+// stored here: a batch's stock is worked out from what was received,
 // returned and sold (utils/batchStock.js), so saving a sale is what lowers it.
+// Stock is counted in packs, so a Unit sale saves Quantity = units / pack size.
 const router = Router();
 
 const PHONE = /^\+?[0-9][0-9\s-]*$/;
 const round2 = (n) => Math.round(n * 100) / 100;
+const round4 = (n) => Math.round(n * 10000) / 10000;
 const CODE = docNoSql('S', 'h.SalesBillingId');
 
 // Serialises stock-changing saves so two bills can't both take the last units.
@@ -60,7 +64,8 @@ router.get('/batches/:itemId', async (req, res) => {
 
 const LINES_SQL = `
   SELECT l.LineId, l.ItemId, i.Name AS ItemName, l.Batch, l.ExpiryDate, l.Quantity, l.Rate, l.Amount,
-         i.Rack, i.BoxNo, i.MRP, i.SellPrice
+         ISNULL(l.SaleUnit, 'pack') AS SaleUnit, ISNULL(l.UnitQty, l.Quantity) AS UnitQty, ISNULL(l.PackSize, 1) AS PackSize,
+         i.Rack, i.BoxNo, i.MRP, i.SellPrice, i.Pack
   FROM SalesBillingItem l
   JOIN PharmacyItem i ON i.ItemId = l.ItemId
   WHERE l.SalesBillingId = @id
@@ -114,7 +119,7 @@ async function checkSale(tx, body, saleId) {
   if (itemIds.length) {
     const found = await new sql.Request(tx)
       .input('ids', sql.NVarChar(sql.MAX), [...new Set(itemIds)].join(','))
-      .query(`SELECT ItemId, Name, MRP FROM PharmacyItem
+      .query(`SELECT ItemId, Name, MRP, Pack FROM PharmacyItem
               WHERE IsActive = 1 AND ItemId IN (SELECT CAST(value AS INT) FROM STRING_SPLIT(@ids, ','))`);
     for (const r of found.recordset) items.set(r.ItemId, r);
   }
@@ -122,7 +127,7 @@ async function checkSale(tx, body, saleId) {
   const batchOf = (itemId, batch) => batches.find((b) => b.ItemId === itemId && b.Batch === batch);
 
   const lines = [];
-  const wanted = new Map(); // "itemId|batch" -> total qty across lines
+  const wanted = new Map(); // "itemId|batch" -> total packs across lines
   for (const [i, it] of raw.entries()) {
     const row = `Row ${i + 1}`;
     const item = items.get(Number(it.itemId));
@@ -130,18 +135,24 @@ async function checkSale(tx, body, saleId) {
     const batch = String(it.batch ?? '').trim();
     const b = batchOf(item.ItemId, batch);
     if (!b) return { error: `${row} (${item.Name}): pick a batch that has stock` };
+    const saleUnit = it.saleUnit === 'unit' ? 'unit' : 'pack';
+    const size = saleUnit === 'unit' ? packSize(item.Pack) : 1;
     const qty = Number(it.quantity);
     if (!(qty > 0)) return { error: `${row} (${item.Name}): Quantity must be more than 0` };
     const price = Number(it.rate);
     if (!(price > 0)) return { error: `${row} (${item.Name}): Sale Price must be more than 0` };
-    const mrp = Number(item.MRP);
-    if (mrp > 0 && price > mrp) return { error: `${row} (${item.Name}): Sale Price can't be above MRP ${mrp.toFixed(2)}` };
+    const mrp = round2(Number(item.MRP) / size);
+    if (mrp > 0 && price > mrp) return { error: `${row} (${item.Name}): Sale Price can't be above MRP ${mrp.toFixed(2)}${saleUnit === 'unit' ? ' per unit' : ''}` };
+    const packs = round4(qty / size);
     const key = `${item.ItemId}|${batch}`;
-    wanted.set(key, (wanted.get(key) || 0) + qty);
-    if (wanted.get(key) > b.AvailableQty) {
-      return { error: `${item.Name}${batch ? ` batch ${batch}` : ''}: only ${b.AvailableQty} in stock` };
+    wanted.set(key, (wanted.get(key) || 0) + packs);
+    if (wanted.get(key) > b.AvailableQty + 0.00005) {
+      return { error: `${item.Name}${batch ? ` batch ${batch}` : ''}: only ${round2(b.AvailableQty)} pack(s) in stock` };
     }
-    lines.push({ itemId: item.ItemId, batch: batch || null, expiryDate: b.ExpiryDate, qty, rate: round2(price), amount: round2(qty * price) });
+    lines.push({
+      itemId: item.ItemId, batch: batch || null, expiryDate: b.ExpiryDate, qty: packs, rate: round2(price), amount: round2(qty * price),
+      saleUnit, unitQty: qty, packSize: size,
+    });
   }
   const total = round2(lines.reduce((s, l) => s + l.amount, 0));
   return { transDate, customerName, mobileNo: mobileNo || null, lines, total };
@@ -152,13 +163,16 @@ async function insertLines(tx, saleId, lines) {
     await new sql.Request(tx)
       .input('id', sql.Int, saleId)
       .input('itemId', sql.Int, l.itemId)
-      .input('qty', sql.Decimal(10, 2), l.qty)
+      .input('qty', sql.Decimal(12, 4), l.qty)
       .input('rate', sql.Decimal(10, 2), l.rate)
       .input('amount', sql.Decimal(12, 2), l.amount)
       .input('batch', sql.NVarChar(100), l.batch)
       .input('expiry', sql.Date, l.expiryDate)
-      .query(`INSERT INTO SalesBillingItem (SalesBillingId, ItemId, Quantity, Rate, Amount, Batch, ExpiryDate)
-              VALUES (@id, @itemId, @qty, @rate, @amount, @batch, @expiry)`);
+      .input('saleUnit', sql.NVarChar(10), l.saleUnit)
+      .input('unitQty', sql.Decimal(10, 2), l.unitQty)
+      .input('packSize', sql.Int, l.packSize)
+      .query(`INSERT INTO SalesBillingItem (SalesBillingId, ItemId, Quantity, Rate, Amount, Batch, ExpiryDate, SaleUnit, UnitQty, PackSize)
+              VALUES (@id, @itemId, @qty, @rate, @amount, @batch, @expiry, @saleUnit, @unitQty, @packSize)`);
   }
 }
 

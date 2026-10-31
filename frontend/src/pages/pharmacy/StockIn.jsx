@@ -21,16 +21,20 @@ const rowFromLine = (l, saved) => ({
   ...l, ticked: false,
   batchNo: saved?.BatchNo || '', mfg: monthOf(saved?.MfgDate), exp: monthOf(saved?.ExpDate),
   qty: saved ? numStr(saved.Quantity) : String(l.Due || 0),
-  sales: saved ? numStr(saved.SalesPercent) : '', disc: saved ? numStr(saved.DiscPercent) : '',
+  free: saved ? numStr(saved.FreeQty || 0) : String(l.FreeDue || 0),
+  disc: saved ? numStr(saved.DiscPercent) : '',
   savedMfg: monthOf(saved?.MfgDate), savedExp: monthOf(saved?.ExpDate),
 });
 
 // A row's problem (the server checks the same), or null. Rows at 0 are skipped.
 function rowProblem(r) {
   const qty = Number(r.qty || 0);
-  if (qty === 0) return null;
-  if (!(qty > 0)) return { qty: 'Must be more than 0' };
+  const free = Number(r.free || 0);
+  if (qty === 0 && free === 0) return null;
+  if (!(qty >= 0)) return { qty: '0 or more' };
+  if (!(free >= 0)) return { free: '0 or more' };
   if (qty > r.Due) return { qty: `Only ${r.Due} due` };
+  if (free > r.FreeDue) return { free: `Only ${r.FreeDue} free due` };
   if (!r.batchNo.trim()) return { batchNo: 'Required' };
   const now = thisMonth();
   if (!r.exp) return { exp: 'Required' };
@@ -38,17 +42,15 @@ function rowProblem(r) {
   if (r.mfg && r.mfg > now && r.mfg !== r.savedMfg) return { mfg: 'Future month' };
   if (r.mfg && r.exp <= r.mfg) return { exp: 'Must be after Mf.Date' };
   const d = Number(r.disc || 0);
-  if (!(Number(r.sales || 0) >= 0)) return { sales: '0 or more' };
   if (!(d >= 0 && d <= 100)) return { disc: '0–100' };
-  if (selAmount({ rate: r.Rate, salesPercent: r.sales, discPercent: r.disc }) > Number(r.MRP)) return { sel: 'Above MRP' };
   return null;
 }
 
-const emptyFill = { batchNo: '', mfg: '', exp: '', sales: '', disc: '' };
+const emptyFill = { batchNo: '', mfg: '', exp: '', disc: '' };
 
 // Pharmacy > Stock In > Master: goods received against a purchase order.
 // Saving adds the quantities to stock and sets each item's selling price to
-// its Sel.Amount (Cur.Rate + Sales %, less Discount %).
+// its Sel.Amount (MRP less Discount %).
 export default function StockIn() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -118,7 +120,7 @@ export default function StockIn() {
 
   const problems = rows.map(rowProblem);
   const hasProblem = problems.some(Boolean);
-  const receiving = rows.filter((r) => Number(r.qty || 0) > 0);
+  const receiving = rows.filter((r) => Number(r.qty || 0) > 0 || Number(r.free || 0) > 0);
 
   const reset = () => { setEditing(null); setVendorId(''); setOrders([]); setOrderId(''); setRows([]); setInDate(today()); setFill(emptyFill); };
 
@@ -127,13 +129,13 @@ export default function StockIn() {
     if (!vendorId) return show('Vendor Name is required', 'error');
     if (!orderId) return show('Purchase No is required', 'error');
     if (!inDate) return show('Date is required', 'error');
-    if (!receiving.length) return show('Enter a Quantity on at least one line', 'error');
+    if (!receiving.length) return show('Enter a Received quantity on at least one line', 'error');
     if (hasProblem) return show('Fix the boxes marked in red first', 'error');
     setSaving(true);
     try {
       const body = {
         vendorId: Number(vendorId), purchaseOrderId: Number(orderId), inDate,
-        lines: rows.map((r) => ({ poLineId: r.PoLineId, batchNo: r.batchNo, mfgMonth: r.mfg, expMonth: r.exp, quantity: r.qty, salesPercent: r.sales, discPercent: r.disc })),
+        lines: rows.map((r) => ({ poLineId: r.PoLineId, batchNo: r.batchNo, mfgMonth: r.mfg, expMonth: r.exp, quantity: r.qty, freeQty: r.free, discPercent: r.disc })),
       };
       if (editing) {
         await stockInApi.update(editing.id, body);
@@ -198,7 +200,6 @@ export default function StockIn() {
               <div className="w-28"><label className="label">Batch No</label><input className="input" value={fill.batchNo} onChange={(e) => setFill((f) => ({ ...f, batchNo: e.target.value }))} /></div>
               <div className="w-36"><label className="label">Mf.Date</label><input type="month" className="input" value={fill.mfg} onChange={(e) => setFill((f) => ({ ...f, mfg: e.target.value }))} /></div>
               <div className="w-36"><label className="label">Exp.Date</label><input type="month" className="input" value={fill.exp} onChange={(e) => setFill((f) => ({ ...f, exp: e.target.value }))} /></div>
-              <div className="w-20"><label className="label">Sales %</label><input type="number" min="0" step="0.01" className="input no-spin" value={fill.sales} onChange={(e) => setFill((f) => ({ ...f, sales: e.target.value }))} /></div>
               <div className="w-20"><label className="label">Discount %</label><input type="number" min="0" max="100" step="0.01" className="input no-spin" value={fill.disc} onChange={(e) => setFill((f) => ({ ...f, disc: e.target.value }))} /></div>
               <button type="button" className="btn-primary py-1" onClick={applyFill}>Apply to {ticked} row(s)</button>
             </div>
@@ -219,15 +220,15 @@ export default function StockIn() {
                   </th>
                   {showOptional && ['Generic Name', 'Manufacturer', 'HSN Code', 'Category'].map((h) => <th key={h} className={`${cell} ${opt}`}>{h}</th>)}
                   <th className={`${cell} w-14`}>Pack</th>
+                  <th className={`${cell} w-14`} title="Type / Unit from Item Master">Unit</th>
                   <th className={`${cell} w-16 text-right`}>MRP</th>
                   <th className={`${cell} w-16 text-right`}>Cur.Rate</th>
                   <th className={`${cell} w-14 text-right`}>Ordered</th>
-                  <th className={`${cell} w-16 text-right`}>Received</th>
+                  <th className={`${cell} w-20 text-right`} title="Paid units arriving now">Received</th>
+                  <th className={`${cell} w-20 text-right`} title="Free units arriving now — added to stock, not charged">Free Received</th>
                   <th className={`${cell} w-24`}>Batch No</th>
                   <th className={`${cell} w-32`}>Mf.Date</th>
                   <th className={`${cell} w-32`}>Exp.Date</th>
-                  <th className={`${cell} w-16 text-right`}>Quantity</th>
-                  <th className={`${cell} w-16 text-right`}>Sales %</th>
                   <th className={`${cell} w-16 text-right`}>Discount %</th>
                   <th className={`${cell} w-20 text-right`}>Sel.Amount</th>
                 </tr>
@@ -238,11 +239,11 @@ export default function StockIn() {
                 )}
                 {rows.map((r, i) => {
                   const p = problems[i] || {};
-                  const sel = selAmount({ rate: r.Rate, salesPercent: r.sales, discPercent: r.disc });
-                  const skipped = Number(r.qty || 0) === 0;
+                  const sel = selAmount({ mrp: r.MRP, discPercent: r.disc });
+                  const skipped = Number(r.qty || 0) === 0 && Number(r.free || 0) === 0;
                   const msg = Object.values(p)[0];
                   return (
-                    <tr key={r.PoLineId} className={skipped ? 'text-ink-400' : ''} title={msg || (skipped ? 'Quantity 0 — this row is skipped' : '')}>
+                    <tr key={r.PoLineId} className={skipped ? 'text-ink-400' : ''} title={msg || (skipped ? 'Nothing received — this row is skipped' : '')}>
                       <td className={`${cell} text-center`}><input type="checkbox" checked={r.ticked} onChange={() => setRow(i, { ticked: !r.ticked })} /></td>
                       <td className={`${cell} px-1.5 font-medium ${skipped ? '' : 'text-ink-800'}`}>
                         {r.ItemName}
@@ -250,17 +251,26 @@ export default function StockIn() {
                       </td>
                       {showOptional && [r.GenericName, r.Manufacturer, r.HSNCode, r.Category].map((v, k) => <td key={k} className={`${cell} ${opt} px-1.5`}>{v}</td>)}
                       <td className={`${cell} px-1.5`}>{r.Pack}</td>
+                      <td className={`${cell} px-1.5`}>{r.Unit}</td>
                       <td className={`${cell} ${ro}`}>{money(r.MRP)}</td>
                       <td className={`${cell} ${ro}`}>{money(r.Rate)}</td>
-                      <td className={`${cell} ${ro}`}>{r.Ordered}</td>
-                      <td className={`${cell} ${ro}`}>{r.Received}</td>
-                      <td className={cell}><input data-r={i} data-c={0} className={`${box} ${p.batchNo ? bad : ''}`} value={r.batchNo} onChange={(e) => setRow(i, { batchNo: e.target.value })} /></td>
-                      <td className={cell}><input type="month" data-r={i} data-c={1} className={`${box} ${p.mfg ? bad : ''}`} value={r.mfg} onChange={(e) => setRow(i, { mfg: e.target.value })} /></td>
-                      <td className={cell}><input type="month" data-r={i} data-c={2} className={`${box} ${p.exp ? bad : ''}`} value={r.exp} onChange={(e) => setRow(i, { exp: e.target.value })} /></td>
-                      <td className={cell}><input type="number" min="0" step="any" data-r={i} data-c={3} className={`${box} no-spin text-right ${p.qty ? bad : ''}`} value={r.qty} onChange={(e) => setRow(i, { qty: e.target.value })} /></td>
-                      <td className={cell}><input type="number" min="0" step="0.01" data-r={i} data-c={4} className={`${box} no-spin text-right ${p.sales ? bad : ''}`} value={r.sales} onChange={(e) => setRow(i, { sales: e.target.value })} /></td>
+                      <td className={`${cell} ${ro}`}>
+                        {r.Ordered}
+                        {r.FreeOrdered > 0 && <p className="text-[11px] text-ink-400">+ {r.FreeOrdered} free</p>}
+                      </td>
+                      <td className={cell} title={`Ordered ${r.Ordered} · received earlier ${r.Received} · still due ${r.Due}`}>
+                        <input type="number" min="0" step="any" data-r={i} data-c={0} className={`${box} no-spin text-right ${p.qty ? bad : ''}`} value={r.qty} onChange={(e) => setRow(i, { qty: e.target.value })} />
+                        {r.Received > 0 && <p className="px-1 text-right text-[11px] text-ink-400">earlier: {r.Received}</p>}
+                      </td>
+                      <td className={cell} title={`Free ordered ${r.FreeOrdered} · received earlier ${r.FreeReceived} · still due ${r.FreeDue}`}>
+                        <input type="number" min="0" step="any" data-r={i} data-c={1} className={`${box} no-spin text-right ${p.free ? bad : ''}`} value={r.free} onChange={(e) => setRow(i, { free: e.target.value })} />
+                        {r.FreeReceived > 0 && <p className="px-1 text-right text-[11px] text-ink-400">earlier: {r.FreeReceived}</p>}
+                      </td>
+                      <td className={cell}><input data-r={i} data-c={2} className={`${box} ${p.batchNo ? bad : ''}`} value={r.batchNo} onChange={(e) => setRow(i, { batchNo: e.target.value })} /></td>
+                      <td className={cell}><input type="month" data-r={i} data-c={3} className={`${box} ${p.mfg ? bad : ''}`} value={r.mfg} onChange={(e) => setRow(i, { mfg: e.target.value })} /></td>
+                      <td className={cell}><input type="month" data-r={i} data-c={4} className={`${box} ${p.exp ? bad : ''}`} value={r.exp} onChange={(e) => setRow(i, { exp: e.target.value })} /></td>
                       <td className={cell}><input type="number" min="0" max="100" step="0.01" data-r={i} data-c={5} className={`${box} no-spin text-right ${p.disc ? bad : ''}`} value={r.disc} onChange={(e) => setRow(i, { disc: e.target.value })} /></td>
-                      <td className={`${cell} px-1.5 text-right font-semibold ${p.sel ? 'bg-red-50 text-red-700' : 'text-ink-800'}`}>{money(sel)}</td>
+                      <td className={`${cell} px-1.5 text-right font-semibold text-ink-800`}>{money(sel)}</td>
                     </tr>
                   );
                 })}
@@ -270,7 +280,7 @@ export default function StockIn() {
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-ink-500">
-              Quantity starts at what's still due; rows left at 0 are skipped. Sel.Amount = Cur.Rate + Sales %, less Discount % — it can't be above MRP.
+              Received / Free Received start at what's still due on the order; both go into stock, only Received is charged. Rows with nothing received are skipped. Sel.Amount = MRP less Discount %.
             </p>
             <div className="flex gap-2">
               <button type="button" className="btn-secondary" onClick={() => (editing ? navigate('/pharmacy/stock-in-list') : reset())}><X size={16} /> Cancel</button>
