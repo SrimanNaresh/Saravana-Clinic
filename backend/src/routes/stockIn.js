@@ -25,13 +25,28 @@ const lockStock = (tx) => new sql.Request(tx).query(
   "EXEC sp_getapplock @Resource = 'pharmacy-stock', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000",
 );
 
-// A vendor's orders for the Purchase No drop-down.
+// A vendor's orders for the Purchase No drop-down: only those with something
+// still to come in (paid or free). ?includeOrderId= keeps one in the list
+// anyway — the order of a Stock In being edited.
 router.get('/orders', async (req, res) => {
   try {
     const pool = await getPool();
-    const r = await pool.request().input('vendorId', sql.Int, Number(req.query.vendorId) || 0).query(`
+    const r = await pool.request()
+      .input('vendorId', sql.Int, Number(req.query.vendorId) || 0)
+      .input('include', sql.Int, Number(req.query.includeOrderId) || null)
+      .query(`
       SELECT po.PurchaseOrderId, ${PO_NO} AS OrderNo, po.OrderDate, po.TotalAmount
-      FROM PurchaseOrder po WHERE po.IsActive = 1 AND po.VendorId = @vendorId
+      FROM PurchaseOrder po
+      WHERE po.IsActive = 1 AND po.VendorId = @vendorId
+        AND (po.PurchaseOrderId = @include OR EXISTS (
+          SELECT 1 FROM PurchaseOrderItem l
+          OUTER APPLY (
+            SELECT SUM(si.Quantity) AS Paid, SUM(si.FreeQty) AS Free
+            FROM StockInItem si JOIN StockIn h ON h.StockInId = si.StockInId AND h.IsActive = 1
+            WHERE si.PoLineId = l.LineId
+          ) rc
+          WHERE l.PurchaseOrderId = po.PurchaseOrderId
+            AND (ISNULL(rc.Paid, 0) < l.Quantity OR ISNULL(rc.Free, 0) < l.FreeQty)))
       ORDER BY po.PurchaseOrderId DESC`);
     res.json(r.recordset);
   } catch (err) {

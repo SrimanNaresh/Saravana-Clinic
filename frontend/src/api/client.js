@@ -171,7 +171,8 @@ export const stockInApi = {
   list: (search = '') => api.get('/stock-ins', { params: { search } }).then((r) => r.data),
   get: (id) => api.get(`/stock-ins/${id}`).then((r) => r.data),
   // A vendor's purchase orders, and an order's lines with Ordered / Received / Due
-  orders: (vendorId) => api.get('/stock-ins/orders', { params: { vendorId } }).then((r) => r.data),
+  // Orders still to be received; includeOrderId keeps one listed (the order of a Stock In being edited)
+  orders: (vendorId, includeOrderId) => api.get('/stock-ins/orders', { params: { vendorId, includeOrderId } }).then((r) => r.data),
   orderLines: (orderId, excludeStockInId) => api.get(`/stock-ins/order-lines/${orderId}`, { params: { excludeStockInId } }).then((r) => r.data),
   create: (data) => api.post('/stock-ins', data).then((r) => r.data),
   update: (id, data) => api.put(`/stock-ins/${id}`, data).then((r) => r.data),

@@ -27,6 +27,34 @@ const rowFromLine = (l, saved) => ({
 });
 
 // A row's problem (the server checks the same), or null. Rows at 0 are skipped.
+// A month typed as MM/YY. The row keeps it as 'YYYY-MM' (what the server
+// takes), 'bad' while the text isn't a full, real month, or '' when empty.
+const BAD_MONTH = 'bad';
+const monthToText = (ym) => (ym && ym !== BAD_MONTH ? `${ym.slice(5, 7)}/${ym.slice(2, 4)}` : '');
+function textToMonth(text) {
+  if (!text) return '';
+  const m = /^(\d{2})\/(\d{2})$/.exec(text);
+  if (!m || Number(m[1]) < 1 || Number(m[1]) > 12) return BAD_MONTH;
+  return `20${m[2]}-${m[1]}`;
+}
+
+// The MM/YY box: digits only, the slash is put in after the month.
+function MonthBox({ value, onChange, className, ...rest }) {
+  const [text, setText] = useState(monthToText(value));
+  // Follow changes made from outside (bulk fill, loading a Stock In).
+  useEffect(() => {
+    if (textToMonth(text) !== value && value !== BAD_MONTH) setText(monthToText(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const change = (e) => {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+    const next = digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
+    setText(next);
+    onChange(textToMonth(next));
+  };
+  return <input inputMode="numeric" placeholder="MM/YY" maxLength={5} className={className} value={text} onChange={change} {...rest} />;
+}
+
 function rowProblem(r) {
   const qty = Number(r.qty || 0);
   const free = Number(r.free || 0);
@@ -37,6 +65,8 @@ function rowProblem(r) {
   if (free > r.FreeDue) return { free: `Only ${r.FreeDue} free due` };
   if (!r.batchNo.trim()) return { batchNo: 'Required' };
   const now = thisMonth();
+  if (r.mfg === BAD_MONTH) return { mfg: 'Use MM/YY' };
+  if (r.exp === BAD_MONTH) return { exp: 'Use MM/YY' };
   if (!r.exp) return { exp: 'Required' };
   if (r.exp < now && r.exp !== r.savedExp) return { exp: 'Past month' };
   if (r.mfg && r.mfg > now && r.mfg !== r.savedMfg) return { mfg: 'Future month' };
@@ -82,12 +112,12 @@ export default function StockIn() {
   // Column shares (%) for each arrow state — every set adds up to 100, so the
   // table fits; Item Name and the dates give up room as columns open.
   const W = {
-    chk: 2.5, pack: 3.5, unit: 3.5, mrp: 4.5, amount: 5.5, gstAmt: 5.5, pRate: 4.5, discP: 5,
-    gst: 4, cgst: 4.5, sgst: 5.5, total: 5, rec: 5, rOrder: 5, disc: 4.5,
-    ...(!showRate && !showGst && { item: 13.5, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 8.5, sel: 6 }),
-    ...(showRate && !showGst && { item: 11, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 7.75, sel: 6 }),
-    ...(!showRate && showGst && { item: 11, ord: 4, free: 3, rFree: 4, batch: 5.5, month: 7, sel: 5.5 }),
-    ...(showRate && showGst && { item: 9.5, ord: 4, free: 3, rFree: 4, batch: 4.5, month: 6.5, sel: 5.5, rec: 4.5 }),
+    chk: 2.5, pack: 3.5, unit: 3.5, mrp: 4.5, amount: 6.5, gstAmt: 6.5, pRate: 4.5, discP: 5.5,
+    gst: 4, cgst: 4.5, sgst: 6, total: 5, rec: 5, rOrder: 5, disc: 4.5,
+    ...(!showRate && !showGst && { item: 16.5, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 6, sel: 6 }),
+    ...(showRate && !showGst && { item: 13, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 6, sel: 6 }),
+    ...(!showRate && showGst && { item: 9, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6, month: 6, sel: 6 }),
+    ...(showRate && showGst && { item: 8, ord: 4.5, free: 3.5, rFree: 4.5, batch: 4.5, month: 5.5, sel: 6 }),
   };
   const w = (key) => ({ width: `${W[key]}%` });
   const [fill, setFill] = useState(emptyFill);
@@ -100,10 +130,11 @@ export default function StockIn() {
     [vendors, vendorId],
   );
 
-  const loadOrders = async (vid) => {
+  // Only orders with something still to receive (plus the edited Stock In's own order).
+  const loadOrders = async (vid, includeOrderId) => {
     setOrders([]);
     if (!vid) return;
-    try { setOrders(await stockInApi.orders(vid)); } catch { show('Failed to load orders', 'error'); }
+    try { setOrders(await stockInApi.orders(vid, includeOrderId)); } catch { show('Failed to load orders', 'error'); }
   };
   const loadLines = async (oid, stockIn) => {
     setRows([]);
@@ -127,7 +158,7 @@ export default function StockIn() {
       setEditing({ id: s.StockInId, no: s.StockInNo, locked: s.locked });
       setVendorId(String(s.VendorId));
       setInDate(String(s.InDate).slice(0, 10));
-      await loadOrders(String(s.VendorId));
+      await loadOrders(String(s.VendorId), s.PurchaseOrderId);
       setOrderId(String(s.PurchaseOrderId));
       await loadLines(s.PurchaseOrderId, s);
     }).catch(() => show('Failed to load the Stock In', 'error'));
@@ -140,6 +171,7 @@ export default function StockIn() {
   const tickAll = () => setRows((rs) => rs.map((r) => ({ ...r, ticked: !allTicked })));
   // Only the boxes filled in the bar are applied.
   const applyFill = () => {
+    if (fill.mfg === BAD_MONTH || fill.exp === BAD_MONTH) return show('Use MM/YY for the dates', 'error');
     const patch = Object.fromEntries(Object.entries(fill).filter(([, v]) => v !== ''));
     setRows((rs) => rs.map((r) => (r.ticked ? { ...r, ...patch } : r)));
     show(`Applied to ${ticked} row(s)`, 'success');
@@ -182,8 +214,15 @@ export default function StockIn() {
 
   const locked = editing?.locked;
   const cell = 'border border-ink-200 px-1 py-0.5 break-words';
-  // Headings centred both ways (Item Name stays left); they wrap at spaces when narrow.
-  const hd = 'border border-ink-200 px-0.5 py-1.5 text-center align-middle text-[10px] xl:text-[11px]';
+  // Headings: one line, aligned like their column's values. Headings with an
+  // arrow keep room on the left for it, so the label still lines up with the
+  // numbers on the right.
+  const hd = 'relative border border-ink-200 px-1 py-2 align-middle text-[10px] whitespace-nowrap xl:text-[11px]';
+  const hdArrow = 'relative border border-ink-200 py-2 pl-[20px] pr-1 align-middle text-[10px] whitespace-nowrap xl:text-[11px]';
+  // Each column's alignment, used by its heading and its cells alike: text to
+  // the left, short codes and dates centred, numbers to the right.
+  const AL = { item: 'text-left', batch: 'text-left', chk: 'text-center', pack: 'text-center', unit: 'text-center', month: 'text-center' };
+  const al = (key) => AL[key] || 'text-right';
   const box = 'w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] focus:border-brand-400 focus:bg-white focus:outline-none';
   const bad = 'border-red-400 bg-red-50 text-red-700';
   const ro = 'px-1 text-right text-ink-600';
@@ -199,7 +238,7 @@ export default function StockIn() {
     gst: { head: 'bg-amber-100 text-amber-800 border-t-2 border-t-amber-400', cell: 'bg-amber-50/70 text-amber-900', pill: 'bg-amber-100 text-amber-700 ring-amber-300 hover:bg-amber-200' },
   };
   const arrow = (group, open, onClick, title) => (
-    <button type="button" className={`ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full ring-1 transition-colors ${GROUP[group].pill}`} title={title} onClick={onClick}>
+    <button type="button" className={`absolute left-0.5 top-1/2 inline-flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full ring-1 transition-colors ${GROUP[group].pill}`} title={title} onClick={onClick}>
       {open ? <ChevronLeft size={11} strokeWidth={2.5} /> : <ChevronRight size={11} strokeWidth={2.5} />}
     </button>
   );
@@ -229,7 +268,7 @@ export default function StockIn() {
             <div className="w-full sm:w-80">
               <label className="label">Purchase No *</label>
               <select className="input" value={orderId} disabled={!vendorId || !!editing} onChange={(e) => pickOrder(e.target.value)}>
-                <option value="">{vendorId ? (orders.length ? 'Pick an order' : 'No orders for this vendor') : 'Pick a vendor first'}</option>
+                <option value="">{vendorId ? (orders.length ? 'Pick an order' : 'No orders left to receive for this vendor') : 'Pick a vendor first'}</option>
                 {orders.map((o) => <option key={o.PurchaseOrderId} value={o.PurchaseOrderId}>{`${o.OrderNo} · ${dateLabel(o.OrderDate)} · ₹${money(o.TotalAmount)}`}</option>)}
               </select>
             </div>
@@ -243,8 +282,8 @@ export default function StockIn() {
             <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-brand-100 bg-brand-50/50 p-2">
               <span className="self-center text-sm font-medium text-brand-700">Fill the ticked rows</span>
               <div className="w-28"><label className="label">Batch No</label><input className="input" value={fill.batchNo} onChange={(e) => setFill((f) => ({ ...f, batchNo: e.target.value }))} /></div>
-              <div className="w-36"><label className="label">Mf.Date</label><input type="month" className="input" value={fill.mfg} onChange={(e) => setFill((f) => ({ ...f, mfg: e.target.value }))} /></div>
-              <div className="w-36"><label className="label">Exp.Date</label><input type="month" className="input" value={fill.exp} onChange={(e) => setFill((f) => ({ ...f, exp: e.target.value }))} /></div>
+              <div className="w-24"><label className="label">Mf.Date</label><MonthBox className={`input ${fill.mfg === BAD_MONTH ? 'border-red-400 bg-red-50' : ''}`} value={fill.mfg} onChange={(v) => setFill((f) => ({ ...f, mfg: v }))} /></div>
+              <div className="w-24"><label className="label">Exp.Date</label><MonthBox className={`input ${fill.exp === BAD_MONTH ? 'border-red-400 bg-red-50' : ''}`} value={fill.exp} onChange={(v) => setFill((f) => ({ ...f, exp: v }))} /></div>
               <div className="w-20"><label className="label">Discount %</label><input type="number" min="0" max="100" step="0.01" className="input no-spin" value={fill.disc} onChange={(e) => setFill((f) => ({ ...f, disc: e.target.value }))} /></div>
               <button type="button" className="btn-primary py-1" onClick={applyFill}>Apply to {ticked} row(s)</button>
             </div>
@@ -256,47 +295,47 @@ export default function StockIn() {
             <table className="w-full table-fixed border-collapse text-left text-[12px]" style={{ minWidth: 1170 }} {...gridKeys}>
               <thead>
                 <tr className="bg-brand-50 font-bold leading-tight text-brand-700">
-                  <th className={`${hd}`} style={w('chk')}><input type="checkbox" checked={allTicked} onChange={tickAll} disabled={!rows.length} title="Tick all" /></th>
-                  <th className={`${hd} !text-left`} style={w('item')}>Item Name</th>
-                  <th className={`${hd}`} style={w('pack')}>Pack</th>
-                  <th className={`${hd}`} style={w('unit')} title="Type / Unit from Item Master">Unit</th>
-                  <th className={`${hd}`} style={w('mrp')}>MRP</th>
+                  <th className={`${hd} ${al('chk')}`} style={w('chk')}><input type="checkbox" checked={allTicked} onChange={tickAll} disabled={!rows.length} title="Tick all" /></th>
+                  <th className={`${hd} ${al('item')}`} style={w('item')}>Item Name</th>
+                  <th className={`${hd} ${al('pack')}`} style={w('pack')}>Pack</th>
+                  <th className={`${hd} ${al('unit')}`} style={w('unit')} title="Type / Unit from Item Master">Unit</th>
+                  <th className={`${hd} ${al('mrp')}`} style={w('mrp')}>MRP</th>
                   {showRate ? (
                     <>
-                      <th className={`${hd} ${GROUP.rate.head}`} style={w('pRate')} title="The order's purchase rate">P.Rate</th>
-                      <th className={`${hd} ${GROUP.rate.head}`} style={w('discP')} title="The order's discount on P.Rate">
-                        <span className="inline-flex items-center">Disc%{arrow('rate', true, () => setShowRate(false), 'Show Amount again')}</span>
+                      <th className={`${hd} ${GROUP.rate.head} ${al('pRate')}`} style={w('pRate')} title="The order's purchase rate">P.Rate</th>
+                      <th className={`${hdArrow} ${GROUP.rate.head} ${al('discP')}`} style={w('discP')} title="The order's discount on P.Rate">
+                        <span>Disc%</span>{arrow('rate', true, () => setShowRate(false), 'Show Amount again')}
                       </th>
                     </>
                   ) : (
-                    <th className={`${hd}`} style={w('amount')} title="R.Order × the order's rate (P.Rate less Disc%)">
-                      <span className="inline-flex items-center">Amount{arrow('rate', false, () => setShowRate(true), 'Show P.Rate and Disc%')}</span>
+                    <th className={`${hdArrow} ${al('amount')}`} style={w('amount')} title="R.Order × the order's rate (P.Rate less Disc%)">
+                      <span>Amount</span>{arrow('rate', false, () => setShowRate(true), 'Show P.Rate and Disc%')}
                     </th>
                   )}
                   {showGst ? (
                     <>
-                      <th className={`${hd} ${GROUP.gst.head}`} style={w('gst')}>GST%</th>
-                      <th className={`${hd} ${GROUP.gst.head}`} style={w('cgst')}>CGST%</th>
-                      <th className={`${hd} ${GROUP.gst.head}`} style={w('sgst')}>
-                        <span className="inline-flex items-center">SGST%{arrow('gst', true, () => setShowGst(false), 'Show GST Amt again')}</span>
+                      <th className={`${hd} ${GROUP.gst.head} ${al('gst')}`} style={w('gst')}>GST%</th>
+                      <th className={`${hd} ${GROUP.gst.head} ${al('cgst')}`} style={w('cgst')}>CGST%</th>
+                      <th className={`${hdArrow} ${GROUP.gst.head} ${al('sgst')}`} style={w('sgst')}>
+                        <span>SGST%</span>{arrow('gst', true, () => setShowGst(false), 'Show GST Amt again')}
                       </th>
                     </>
                   ) : (
-                    <th className={`${hd}`} style={w('gstAmt')}>
-                      <span className="inline-flex items-center">GST Amt{arrow('gst', false, () => setShowGst(true), 'Show GST%, CGST% and SGST%')}</span>
+                    <th className={`${hdArrow} ${al('gstAmt')}`} style={w('gstAmt')}>
+                      <span>GST Amt</span>{arrow('gst', false, () => setShowGst(true), 'Show GST%, CGST% and SGST%')}
                     </th>
                   )}
-                  <th className={`${hd}`} style={w('total')} title="Amount + GST for what's received now">Total</th>
-                  <th className={`${hd}`} style={w('ord')} title="Paid units on the order">Ordered</th>
-                  <th className={`${hd}`} style={w('free')} title="Free units on the order">Free</th>
-                  <th className={`${hd}`} style={w('rec')} title="Total arriving now — splits into R.Order and R.Free">Received</th>
-                  <th className={`${hd}`} style={w('rOrder')} title="Paid units received now (charged)">R.Order</th>
-                  <th className={`${hd}`} style={w('rFree')} title="Free units received now — added to stock, not charged">R.Free</th>
-                  <th className={`${hd}`} style={w('batch')}>Batch No</th>
-                  <th className={`${hd}`} style={w('month')}>Mf.Date</th>
-                  <th className={`${hd}`} style={w('month')}>Exp.Date</th>
-                  <th className={`${hd}`} style={w('disc')} title="Discount on MRP for the selling price">Discount %</th>
-                  <th className={`${hd}`} style={w('sel')}>Sel.Amount</th>
+                  <th className={`${hd} ${al('total')}`} style={w('total')} title="Amount + GST for what's received now">Total</th>
+                  <th className={`${hd} ${al('ord')}`} style={w('ord')} title="Paid units on the order">Ordered</th>
+                  <th className={`${hd} ${al('free')}`} style={w('free')} title="Free units on the order">Free</th>
+                  <th className={`${hd} ${al('rec')}`} style={w('rec')} title="Total arriving now — splits into R.Order and R.Free">Received</th>
+                  <th className={`${hd} ${al('rOrder')}`} style={w('rOrder')} title="Paid units received now (charged)">R.Order</th>
+                  <th className={`${hd} ${al('rFree')}`} style={w('rFree')} title="Free units received now — added to stock, not charged">R.Free</th>
+                  <th className={`${hd} ${al('batch')}`} style={w('batch')}>Batch No</th>
+                  <th className={`${hd} ${al('month')}`} style={w('month')} title="Month the batch was made, as MM/YY">Mf.Date</th>
+                  <th className={`${hd} ${al('month')}`} style={w('month')} title="Expiry month, as MM/YY">Exp.Date</th>
+                  <th className={`${hd} ${al('disc')}`} style={w('disc')} title="Selling discount on MRP (Sel.Amount = MRP less this)">S.Disc%</th>
+                  <th className={`${hd} ${al('sel')}`} style={w('sel')}>Sel.Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -316,8 +355,8 @@ export default function StockIn() {
                         {r.ItemName}
                         {msg && <p className="text-[11px] font-normal text-red-600">{msg}</p>}
                       </td>
-                      <td className={`${cell} px-1`}>{r.Pack}</td>
-                      <td className={`${cell} px-1`}>{r.Unit}</td>
+                      <td className={`${cell} px-1 text-center`}>{r.Pack}</td>
+                      <td className={`${cell} px-1 text-center`}>{r.Unit}</td>
                       <td className={`${cell} ${ro}`}>{money(r.MRP)}</td>
                       {showRate ? (
                         <>
@@ -339,21 +378,21 @@ export default function StockIn() {
                       <td className={`${cell} ${ro} font-semibold text-ink-800`}>{money(oc.total)}</td>
                       <td className={`${cell} ${ro}`}>{r.Ordered}</td>
                       <td className={`${cell} ${ro}`}>{r.FreeOrdered}</td>
-                      <td className={cell} title={`Total arriving now — splits into R.Order (up to ${r.Due} due) and R.Free (up to ${r.FreeDue} free due)`}>
+                      <td className={`${cell} !px-0`} title={`Total arriving now — splits into R.Order (up to ${r.Due} due) and R.Free (up to ${r.FreeDue} free due)`}>
                         <input type="number" min="0" step="any" data-r={i} data-c={0} className={`${box} no-spin text-right font-semibold ${p.qty || p.free ? bad : ''}`} value={receivedOf(r)} onChange={(e) => setRow(i, splitReceived(r, e.target.value))} />
                       </td>
-                      <td className={cell} title={`Ordered ${r.Ordered} · received earlier ${r.Received} · still due ${r.Due}`}>
+                      <td className={`${cell} !px-0`} title={`Ordered ${r.Ordered} · received earlier ${r.Received} · still due ${r.Due}`}>
                         <input type="number" min="0" step="any" data-r={i} data-c={1} className={`${box} no-spin text-right ${p.qty ? bad : ''}`} value={r.qty} onChange={(e) => setRow(i, { qty: e.target.value })} />
                         {r.Received > 0 && <p className="px-1 text-right text-[11px] text-ink-400">earlier: {r.Received}</p>}
                       </td>
-                      <td className={cell} title={`Free ordered ${r.FreeOrdered} · received earlier ${r.FreeReceived} · still due ${r.FreeDue}`}>
+                      <td className={`${cell} !px-0`} title={`Free ordered ${r.FreeOrdered} · received earlier ${r.FreeReceived} · still due ${r.FreeDue}`}>
                         <input type="number" min="0" step="any" data-r={i} data-c={2} className={`${box} no-spin text-right ${p.free ? bad : ''}`} value={r.free} onChange={(e) => setRow(i, { free: e.target.value })} />
                         {r.FreeReceived > 0 && <p className="px-1 text-right text-[11px] text-ink-400">earlier: {r.FreeReceived}</p>}
                       </td>
-                      <td className={cell}><input data-r={i} data-c={3} className={`${box} ${p.batchNo ? bad : ''}`} value={r.batchNo} onChange={(e) => setRow(i, { batchNo: e.target.value })} /></td>
-                      <td className={cell}><input type="month" data-r={i} data-c={4} className={`${box} ${p.mfg ? bad : ''}`} value={r.mfg} onChange={(e) => setRow(i, { mfg: e.target.value })} /></td>
-                      <td className={cell}><input type="month" data-r={i} data-c={5} className={`${box} ${p.exp ? bad : ''}`} value={r.exp} onChange={(e) => setRow(i, { exp: e.target.value })} /></td>
-                      <td className={cell}><input type="number" min="0" max="100" step="0.01" data-r={i} data-c={6} className={`${box} no-spin text-right ${p.disc ? bad : ''}`} value={r.disc} onChange={(e) => setRow(i, { disc: e.target.value })} /></td>
+                      <td className={`${cell} !px-0`}><input data-r={i} data-c={3} className={`${box} text-left ${p.batchNo ? bad : ''}`} value={r.batchNo} onChange={(e) => setRow(i, { batchNo: e.target.value })} /></td>
+                      <td className={`${cell} !px-0`}><MonthBox data-r={i} data-c={4} className={`${box} text-center ${p.mfg ? bad : ''}`} value={r.mfg} onChange={(v) => setRow(i, { mfg: v })} /></td>
+                      <td className={`${cell} !px-0`}><MonthBox data-r={i} data-c={5} className={`${box} text-center ${p.exp ? bad : ''}`} value={r.exp} onChange={(v) => setRow(i, { exp: v })} /></td>
+                      <td className={`${cell} !px-0`}><input type="number" min="0" max="100" step="0.01" data-r={i} data-c={6} className={`${box} no-spin text-right ${p.disc ? bad : ''}`} value={r.disc} onChange={(e) => setRow(i, { disc: e.target.value })} /></td>
                       <td className={`${cell} px-1 text-right font-semibold text-ink-800`}>{money(sel)}</td>
                     </tr>
                   );
@@ -373,7 +412,7 @@ export default function StockIn() {
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-ink-500">
-              Received = R.Order + R.Free and starts at what's still due; typing it splits into R.Order first, then R.Free. Both go into stock, only R.Order is charged. Rows with nothing received are skipped. Sel.Amount = MRP less Discount %.
+              Received = R.Order + R.Free and starts at what's still due; typing it splits into R.Order first, then R.Free. Both go into stock, only R.Order is charged. Rows with nothing received are skipped. Sel.Amount = MRP less S.Disc% (selling discount).
             </p>
             <div className="flex gap-2">
               <button type="button" className="btn-secondary" onClick={() => (editing ? navigate('/pharmacy/stock-in-list') : reset())}><X size={16} /> Cancel</button>
