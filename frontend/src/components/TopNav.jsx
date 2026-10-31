@@ -164,6 +164,15 @@ function firstLeaf(nodes) {
 const CARD_WIDTH = 168;
 const CARD_MIN = 136;
 
+// Where a popup of this width goes: under its menu button, shifted just enough
+// to stay 8px inside both screen edges; as tall as the screen below it allows.
+function fitToScreen(rect, width) {
+  const w = Math.min(width, window.innerWidth - 16);
+  const left = Math.min(Math.max(rect.left + rect.width / 2 - w / 2, 8), window.innerWidth - w - 8);
+  const top = rect.bottom + 6;
+  return { position: 'fixed', top, left, width: w, maxHeight: Math.max(160, window.innerHeight - top - 12) };
+}
+
 const pageCount = (nodes) => nodes.reduce((n, c) => n + (c.submenu ? pageCount(c.submenu) : 1), 0);
 
 // A column's pages; a nested submenu (Consultation > Medication) shows as a
@@ -224,10 +233,11 @@ function DesktopColumnsPanel({ item, rect, panelRef, onNavigate }) {
     .filter(({ part }) => part.submenu.length);
   const matches = shown.reduce((n, { part }) => n + pageCount(part.submenu), 0);
 
-  // Fixed width and an even grid: cards share the width with no gaps at the
-  // sides, fewer columns (more rows) on a narrow screen, and the panel keeps
-  // its size while searching.
-  const width = Math.min(window.innerWidth - 16, parts.length * CARD_WIDTH + 16);
+  // As wide as its sections need, never wider than the screen; cards share the
+  // width with no gaps at the sides, fewer columns (more rows) on a narrow
+  // screen, and the panel keeps its size while searching.
+  const box = fitToScreen(rect, parts.length * CARD_WIDTH + 16);
+  const width = box.width;
   const cols = Math.max(1, Math.min(parts.length, Math.floor((width - 16) / CARD_MIN)));
 
   const onKeyDown = (e) => {
@@ -245,10 +255,10 @@ function DesktopColumnsPanel({ item, rect, panelRef, onNavigate }) {
   return createPortal(
     <div
       ref={panelRef}
-      // Centred by its left edge (not a transform, which the opening animation
+      // Placed by its left edge (not a transform, which the opening animation
       // would override and make the panel slide in sideways).
-      style={{ position: 'fixed', top: rect.bottom + 6, left: Math.max(8, (window.innerWidth - width) / 2), width, maxWidth: 'calc(100vw - 16px)' }}
-      className="z-50 max-h-[78vh] overflow-y-auto rounded-xl border border-ink-200/70 bg-gradient-to-b from-slate-50 to-white shadow-elevated menu-drop"
+      style={box}
+      className="z-50 overflow-y-auto rounded-xl border border-ink-200/70 bg-gradient-to-b from-slate-50 to-white shadow-elevated menu-drop"
     >
       <div className="flex items-center gap-2 border-b border-ink-100 px-3 py-1.5">
         <GroupIcon size={13} className="text-brand-600" />
@@ -307,13 +317,12 @@ function DesktopDropdownPanel({ item, pathname, rect, panelRef, onNavigate }) {
   if (item.children.filter((c) => c.submenu).length > 1) {
     return <DesktopColumnsPanel item={item} rect={rect} panelRef={panelRef} onNavigate={onNavigate} />;
   }
-  const left = Math.min(Math.max(rect.left, 8), window.innerWidth - DROPDOWN_WIDTH - 8);
 
   return createPortal(
     <div
       ref={panelRef}
-      style={{ position: 'fixed', top: rect.bottom + 6, left, width: DROPDOWN_WIDTH }}
-      className="z-50 max-h-[70vh] overflow-y-auto rounded-xl border border-ink-100 bg-white py-2 shadow-elevated menu-drop"
+      style={fitToScreen(rect, DROPDOWN_WIDTH)}
+      className="z-50 overflow-y-auto rounded-xl border border-ink-100 bg-white py-2 shadow-elevated menu-drop"
     >
       {item.children.map((c) => (
         <DesktopNode key={c.label || c.to} node={c} pathname={pathname} onNavigate={onNavigate} depth={0} />
@@ -430,6 +439,7 @@ export default function TopNav({ open, onClose }) {
   const wrapRef = useRef(null);
   const panelRef = useRef(null);
   const navRowRef = useRef(null);
+  const openBtnRef = useRef(null);
 
   useEffect(() => {
     if (!user?.userId) return;
@@ -440,18 +450,24 @@ export default function TopNav({ open, onClose }) {
 
   // Close the open dropdown on an outside click (checking both the bar — for
   // its buttons — and the portaled panel, which lives outside the bar's DOM
-  // subtree), on route change, or on resize/scroll that would stale its position.
+  // subtree), on route change, or when the menu bar scrolls. A window resize
+  // keeps it open and re-fits it to the new screen size.
   useEffect(() => {
     const onClickOutside = (e) => {
       if (wrapRef.current?.contains(e.target)) return;
       if (panelRef.current?.contains(e.target)) return;
       setOpenGroup(null);
     };
+    const onResize = () => {
+      const btn = openBtnRef.current;
+      if (btn?.isConnected && btn.offsetParent) setOpenRect(btn.getBoundingClientRect());
+      else setOpenGroup(null);
+    };
     document.addEventListener('mousedown', onClickOutside);
-    window.addEventListener('resize', closeDropdown);
+    window.addEventListener('resize', onResize);
     return () => {
       document.removeEventListener('mousedown', onClickOutside);
-      window.removeEventListener('resize', closeDropdown);
+      window.removeEventListener('resize', onResize);
     };
   }, []);
   useEffect(() => { setOpenGroup(null); }, [pathname]);
@@ -461,6 +477,7 @@ export default function TopNav({ open, onClose }) {
 
   function toggleGroup(label, e) {
     if (openGroup === label) { setOpenGroup(null); return; }
+    openBtnRef.current = e.currentTarget;
     setOpenRect(e.currentTarget.getBoundingClientRect());
     setOpenGroup(label);
   }
