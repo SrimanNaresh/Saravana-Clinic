@@ -122,3 +122,10 @@
 .no-spin { -moz-appearance: textfield; appearance: textfield; }
 .no-spin::-webkit-inner-spin-button,
 .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Menu drop-downs unfold downward from just under the menu bar. */
+@keyframes menu-down {
+  from { opacity: 0; transform: translateY(-8px) scaleY(0.96); }
+  to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+.menu-drop { animation: menu-down 0.18s ease-out; transform-origin: top; }

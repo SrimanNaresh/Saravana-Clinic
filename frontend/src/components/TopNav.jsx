@@ -245,8 +245,10 @@ function DesktopColumnsPanel({ item, rect, panelRef, onNavigate }) {
   return createPortal(
     <div
       ref={panelRef}
-      style={{ position: 'fixed', top: rect.bottom + 6, left: '50%', transform: 'translateX(-50%)', width, maxWidth: 'calc(100vw - 16px)' }}
-      className="z-50 max-h-[78vh] overflow-y-auto rounded-xl border border-ink-200/70 bg-gradient-to-b from-slate-50 to-white shadow-elevated animate-fade-in"
+      // Centred by its left edge (not a transform, which the opening animation
+      // would override and make the panel slide in sideways).
+      style={{ position: 'fixed', top: rect.bottom + 6, left: Math.max(8, (window.innerWidth - width) / 2), width, maxWidth: 'calc(100vw - 16px)' }}
+      className="z-50 max-h-[78vh] overflow-y-auto rounded-xl border border-ink-200/70 bg-gradient-to-b from-slate-50 to-white shadow-elevated menu-drop"
     >
       <div className="flex items-center gap-2 border-b border-ink-100 px-3 py-1.5">
         <GroupIcon size={13} className="text-brand-600" />
@@ -311,7 +313,7 @@ function DesktopDropdownPanel({ item, pathname, rect, panelRef, onNavigate }) {
     <div
       ref={panelRef}
       style={{ position: 'fixed', top: rect.bottom + 6, left, width: DROPDOWN_WIDTH }}
-      className="z-50 max-h-[70vh] overflow-y-auto rounded-xl border border-ink-100 bg-white py-2 shadow-elevated animate-fade-in"
+      className="z-50 max-h-[70vh] overflow-y-auto rounded-xl border border-ink-100 bg-white py-2 shadow-elevated menu-drop"
     >
       {item.children.map((c) => (
         <DesktopNode key={c.label || c.to} node={c} pathname={pathname} onNavigate={onNavigate} depth={0} />
