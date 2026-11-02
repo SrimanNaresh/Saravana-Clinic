@@ -52,8 +52,9 @@ const AMOUNT_HEADS = ['Buy Amount', 'Sale Amount', 'Discount Amount', 'Net Sale 
 
 // Pharmacy > Stock In > List: every Stock In line, item wise (each item's
 // batches) or date wise (each day's Stock Ins), with the totals of all lines
-// the search matches. Only an Admin sees Delete, which removes a whole Stock
-// In (the server checks the role, and refuses once a Sale or Return used it).
+// the search matches. Only an Admin sees Edit and Delete, which open or remove
+// a whole Stock In (the server checks the role; a Stock In whose batches a Sale
+// or Return used opens read-only and can't be deleted).
 export default function StockInList() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -113,6 +114,9 @@ export default function StockInList() {
       show(err.response?.data?.error || 'Delete failed', 'error');
     }
   };
+  const editButton = (stockInId, no) => (
+    <button type="button" className="btn-ghost px-2 py-1 text-brand-600 hover:bg-brand-50" title={`Edit ${no} (Admin only)`} onClick={() => navigate('/pharmacy/stock-in', { state: { editStockInId: stockInId } })}><Pencil size={15} /></button>
+  );
   const binButton = (stockInId, no) => (
     <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title={`Delete ${no} (Admin only)`} onClick={() => remove(stockInId)}><Trash2 size={15} /></button>
   );
@@ -184,13 +188,13 @@ export default function StockInList() {
                     <tr className="bg-brand-50 font-bold text-brand-700">
                       <th className={cell}>Item / Batch No</th><th className={cell}>Exp</th><th className={cell}>Stock In No</th><th className={cell}>Vendor</th>
                       <th className={`${cell} ${r}`}>Quantity</th>{AMOUNT_HEADS.map((h) => <th key={h} className={`${cell} ${r}`}>{h}</th>)}
-                      {isAdmin && <th className={`${cell} w-14 text-center`}>Delete</th>}
+                      {isAdmin && <th className={`${cell} w-24 text-center`}>Edit / Delete</th>}
                     </tr>
                   ) : (
                     <tr className="bg-brand-50 font-bold text-brand-700">
                       <th className={cell}>Stock In No · Vendor</th><th className={cell}>Item</th><th className={cell}>Batch No</th><th className={cell}>Exp</th>
                       <th className={`${cell} ${r}`}>Quantity</th>{AMOUNT_HEADS.map((h) => <th key={h} className={`${cell} ${r}`}>{h}</th>)}
-                      <th className={`${cell} ${isAdmin ? 'w-24' : 'w-14'} text-center`}>{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
+                      {isAdmin && <th className={`${cell} w-24 text-center`}>Edit / Delete</th>}
                     </tr>
                   )}
                 </thead>
@@ -215,7 +219,11 @@ export default function StockInList() {
                             <td className={`${cell} text-brand-700`} title={dateLabel(l.InDate)}>{l.StockInNo}</td>
                             <td className={cell}>{l.VendorName}</td>
                             {amountCells(l)}
-                            {isAdmin && <td className={`${cell} text-center`}>{binButton(l.StockInId, l.StockInNo)}</td>}
+                            {isAdmin && (
+                              <td className={`${cell} text-center`}>
+                                <div className="flex justify-center gap-1">{editButton(l.StockInId, l.StockInNo)}{binButton(l.StockInId, l.StockInNo)}</div>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </Fragment>
@@ -230,7 +238,7 @@ export default function StockInList() {
                         <tr className="bg-ink-50/70 font-semibold">
                           <td className={cell} colSpan={4}>{dateLabel(date)} <span className="font-normal text-ink-400">· {ins.size} Stock In(s) · {all.length} batch(es)</span></td>
                           {totalsCells(t)}
-                          <td className={cell} />
+                          {isAdmin && <td className={cell} />}
                         </tr>
                         {[...ins.entries()].map(([sid, ls]) => ls.map((l, k) => (
                           <tr key={l.LineId} className={k === 0 ? 'border-t-2 border-ink-300' : ''}>
@@ -244,12 +252,9 @@ export default function StockInList() {
                             <td className={cell}>{l.BatchNo}</td>
                             <td className={cell}>{expLabel(l.ExpDate)}</td>
                             {amountCells(l)}
-                            {k === 0 && (
+                            {k === 0 && isAdmin && (
                               <td className={`${cell} text-center align-middle`} rowSpan={ls.length}>
-                                <div className="flex justify-center gap-1">
-                                  <button type="button" className="btn-ghost px-2 py-1" title={`Edit ${l.StockInNo}`} onClick={() => navigate('/pharmacy/stock-in', { state: { editStockInId: sid } })}><Pencil size={15} /></button>
-                                  {isAdmin && binButton(sid, l.StockInNo)}
-                                </div>
+                                <div className="flex justify-center gap-1">{editButton(sid, l.StockInNo)}{binButton(sid, l.StockInNo)}</div>
                               </td>
                             )}
                           </tr>
@@ -262,7 +267,7 @@ export default function StockInList() {
                   <tr className="bg-ink-800 font-semibold text-white">
                     <td className={cell} colSpan={4}>Total</td>
                     {totalsCells(total)}
-                    {(tab === 'date' || isAdmin) && <td className={cell} />}
+                    {isAdmin && <td className={cell} />}
                   </tr>
                 </tfoot>
               </table>

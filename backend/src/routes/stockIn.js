@@ -257,7 +257,9 @@ async function saveStockIn(req, res, stockInId) {
 }
 
 router.post('/', (req, res) => saveStockIn(req, res, null));
+// Only an Admin may edit a saved Stock In.
 router.put('/:id', (req, res) => {
+  if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can edit a Stock In' });
   const id = Number(req.params.id);
   if (!(id > 0)) return res.status(400).json({ error: 'Bad Stock In id' });
   return saveStockIn(req, res, id);

@@ -3,7 +3,8 @@ import { sql } from '../db/pool.js';
 // Every received batch of the given items with what's left of it:
 // received (Stock In, plus the older Purchase Invoice lines and Stock Inward)
 // - returned to the vendor (Return, plus older Purchase Returns) - sold.
-// SelAmount is the batch's selling price from its latest Stock In line. A batch is the item + its batch number ('' when it had none), the
+// SelAmount, MRP and PurchaseRate (P.Rate less Disc%) are the batch's pack
+// prices from its latest Stock In line (null for batches from older screens). A batch is the item + its batch number ('' when it had none), the
 // same key returns and sales record. `excludeSaleId` leaves one sale out of
 // "sold", so editing a sale can reuse the stock it already took.
 // Earliest expiry first; batches without an expiry go last.
@@ -54,12 +55,12 @@ export async function batchStock(request, itemIds, { excludeSaleId = null } = {}
       )
       SELECT r.ItemId, r.Batch, r.ExpiryDate, r.Qty AS ReceivedQty,
              ISNULL(ret.Qty, 0) AS ReturnedQty, ISNULL(s.Qty, 0) AS SoldQty,
-             r.Qty - ISNULL(ret.Qty, 0) - ISNULL(s.Qty, 0) AS AvailableQty, sel.SelAmount
+             r.Qty - ISNULL(ret.Qty, 0) - ISNULL(s.Qty, 0) AS AvailableQty, sel.SelAmount, sel.MRP, sel.PurchaseRate
       FROM Rcv r
       LEFT JOIN Ret ret ON ret.ItemId = r.ItemId AND ret.Batch = r.Batch
       LEFT JOIN Sold s ON s.ItemId = r.ItemId AND s.Batch = r.Batch
       OUTER APPLY (
-        SELECT TOP 1 l.SelAmount FROM StockInItem l JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
+        SELECT TOP 1 l.SelAmount, l.MRP, l.Rate AS PurchaseRate FROM StockInItem l JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
         WHERE l.ItemId = r.ItemId AND l.BatchNo = r.Batch ORDER BY h.StockInId DESC
       ) sel
       ORDER BY r.ItemId, CASE WHEN r.ExpiryDate IS NULL THEN 1 ELSE 0 END, r.ExpiryDate, r.Batch
@@ -71,5 +72,7 @@ export async function batchStock(request, itemIds, { excludeSaleId = null } = {}
     SoldQty: Number(r.SoldQty),
     AvailableQty: Number(r.AvailableQty),
     SelAmount: r.SelAmount == null ? null : Number(r.SelAmount),
+    MRP: r.MRP == null ? null : Number(r.MRP),
+    PurchaseRate: r.PurchaseRate == null ? null : Number(r.PurchaseRate),
   }));
 }

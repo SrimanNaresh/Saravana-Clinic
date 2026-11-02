@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Receipt, Plus, Trash2, Save, X, List, Printer } from 'lucide-react';
 import { CardHeader, Toast } from '../../components/ui.jsx';
@@ -7,20 +7,21 @@ import SearchPick from '../../components/grid/SearchPick.jsx';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
 import { pharmacyItemApi, salesBillingApi, clinicApi } from '../../api/client.js';
-import { packSize } from '../../utils/purchaseCalc.js';
+import { unitsPerPack, saleLineAmount, saleBill } from '../../utils/purchaseCalc.js';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const today = () => new Date().toISOString().slice(0, 10);
 const money = (n) => (Number(n) || 0).toFixed(2);
 const round2 = (n) => Math.round(n * 100) / 100;
-const expLabel = (iso) => (iso ? `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : 'No expiry');
+// Expiry as MM/YY, like Stock In, so the batch label fits its column.
+const expLabel = (iso) => (iso ? `${iso.slice(5, 7)}/${iso.slice(2, 4)}` : 'none');
 const qtyLabel = (n) => String(Math.round(Number(n) * 100) / 100);
 const batchLabel = (b) => `${b.Batch || 'No batch'} · Exp ${expLabel(b.ExpiryDate)} · ${qtyLabel(b.AvailableQty)}`;
 
 // saleUnit: 'pack' (the whole pack) or 'unit' (one piece). packPrice is the
-// pack's selling price; a unit's is packPrice / pack size.
+// pack's selling price; a unit's is packPrice / the units in the pack (the
+// item's Type / Unit count, e.g. 15 a strip).
 let nextKey = 1;
-const emptyLine = () => ({ key: nextKey++, itemId: '', batches: [], batch: null, saleUnit: 'pack', packPrice: '', qty: '', price: '', loading: false });
+const emptyLine = () => ({ key: nextKey++, itemId: '', batches: [], batch: null, saleUnit: 'pack', packPrice: '', qty: '', price: '', disc: '', loading: false });
 
 // Pharmacy > Sales > Master: a counter sale. Each line is sold from one batch
 // (only batches with stock left, earliest expiry first), by the Pack or by the
@@ -35,11 +36,24 @@ export default function SalesBilling() {
   const [customerName, setCustomerName] = useState('');
   const [mobileNo, setMobileNo] = useState('');
   const [lines, setLines] = useState([emptyLine()]);
+  const [billDisc, setBillDisc] = useState(''); // the bill's Discount %
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [clinic, setClinic] = useState(null);
   // The bill just saved, offered for printing above the form.
   const [printBill, setPrintBill] = useState(null);
+  // Save & Print: print once the saved bill's receipt is in the page; after an
+  // edit, go back to the list when the print dialog closes.
+  const [printNow, setPrintNow] = useState(null); // null | { then?: () => void }
+  useEffect(() => {
+    if (!printNow || !printBill) return undefined;
+    const t = setTimeout(() => {
+      if (printNow.then) window.addEventListener('afterprint', printNow.then, { once: true });
+      window.print();
+      setPrintNow(null);
+    }, 50);
+    return () => clearTimeout(t);
+  }, [printNow, printBill]);
 
   useEffect(() => { pharmacyItemApi.list().then(setCatalog).catch(() => show('Failed to load items', 'error')); }, [show]);
   useEffect(() => { clinicApi.get().then(setClinic).catch(() => setClinic(null)); }, []);
@@ -48,15 +62,46 @@ export default function SalesBilling() {
   const itemOptions = useMemo(() => catalog.map((i) => ({ value: String(i.ItemId), label: i.Name })), [catalog]);
 
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  const addLineAfter = (key) => setLines((ls) => {
-    const i = ls.findIndex((l) => l.key === key);
-    return [...ls.slice(0, i + 1), emptyLine(), ...ls.slice(i + 1)];
-  });
+  // Where the cursor goes after the next render: { key, c } = that row's box
+  // in column c (0 Item Name, 5 Quantity).
+  const [focusAt, setFocusAt] = useState(null);
+  useEffect(() => {
+    if (!focusAt) return;
+    const r = lines.findIndex((l) => l.key === focusAt.key);
+    const el = document.querySelector(`[data-r="${r}"][data-c="${focusAt.c}"]:not(:disabled)`);
+    if (!el) return; // not enabled yet: try again on the next render
+    el.focus();
+    try { el.select(); } catch { /* not selectable */ }
+    setFocusAt(null);
+  }, [focusAt, lines]);
+  // A row added with + gets the cursor in its Item Name box.
+  const addLineAfter = (key) => {
+    const added = emptyLine();
+    setLines((ls) => {
+      const i = ls.findIndex((l) => l.key === key);
+      return [...ls.slice(0, i + 1), added, ...ls.slice(i + 1)];
+    });
+    setFocusAt({ key: added.key, c: 0 });
+  };
+  // Enter on a row: on to the next empty row's Item Name, adding one if needed.
+  const nextItem = (key) => {
+    const i = lines.findIndex((l) => l.key === key);
+    const after = lines[i + 1];
+    if (after && !after.itemId) setFocusAt({ key: after.key, c: 0 });
+    else addLineAfter(key);
+  };
+  const enterTo = (go) => (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
   const removeLine = (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : [emptyLine()]));
 
   const defaultPrice = (item) => item?.SellPrice ?? item?.MRP ?? '';
 
-  const sizeOf = (l) => packSize(itemById.get(l.itemId)?.Pack);
+  const sizeOf = (l) => { const it = itemById.get(l.itemId); return unitsPerPack(it?.Pack, it?.UnitName); };
+  // A pack price shown for the line's Sell by: as is for a pack, divided for a unit.
+  const perSellBy = (l, packValue) => (packValue == null || packValue === '' ? null : round2(Number(packValue) / (l.saleUnit === 'unit' ? sizeOf(l) : 1)));
+  // The batch's MRP and purchase price (P.Rate less Disc%) from its Stock In,
+  // or the item's when the batch came from an older screen.
+  const mrpOf = (l) => perSellBy(l, batchOfLine(l)?.MRP ?? itemById.get(l.itemId)?.MRP);
+  const purchaseOf = (l) => perSellBy(l, batchOfLine(l)?.PurchaseRate ?? itemById.get(l.itemId)?.PurchaseRate);
   // The line's price for its pack price and unit choice.
   const priceFor = (l, packPrice, saleUnit) => {
     const pp = Number(packPrice);
@@ -64,14 +109,33 @@ export default function SalesBilling() {
     return String(saleUnit === 'unit' ? round2(pp / sizeOf(l)) : pp);
   };
 
+  // Each item's batch list is fetched once per bill (picking it again, or on
+  // another row, is instant); cleared after a save, as stock has changed.
+  const batchCache = useRef(new Map());
+  const loadBatches = (itemId) => {
+    const k = `${itemId}|${editingId || ''}`;
+    if (!batchCache.current.has(k)) {
+      batchCache.current.set(k, salesBillingApi.batches(itemId, editingId || undefined).catch((err) => {
+        batchCache.current.delete(k);
+        throw err;
+      }));
+    }
+    return batchCache.current.get(k);
+  };
+
+  // Picking an item fills the earliest-expiring batch and its price, and puts
+  // the cursor on Batch. Enter then moves Batch -> Sell by -> Quantity ->
+  // Disc% -> the next row's Item Name.
   const pickItem = async (key, itemId) => {
     const item = itemById.get(itemId);
     const pp = String(defaultPrice(item));
     setLine(key, { itemId, batches: [], batch: null, saleUnit: 'pack', packPrice: pp, price: pp, qty: '1', loading: true });
+    setFocusAt({ key, c: 1 }); // Batch, once its list has loaded
     try {
-      const batches = await salesBillingApi.batches(itemId, editingId || undefined);
+      const batches = await loadBatches(itemId);
       // The earliest-expiring batch is chosen to start with, at its Stock In selling price.
       const first = batches[0];
+      if (!batches.length) setFocusAt({ key, c: 2 }); // no batch to pick: on to Sell by
       setLine(key, { batches, batch: first?.Batch ?? null, loading: false, ...(first?.SelAmount != null ? { packPrice: String(first.SelAmount), price: String(first.SelAmount) } : {}) });
     } catch {
       show('Failed to load batches for this item', 'error');
@@ -91,25 +155,37 @@ export default function SalesBilling() {
   }
   // A batch's stock in the line's own unit.
   const stockIn = (l, b) => (l.saleUnit === 'unit' ? Math.floor(b.AvailableQty * sizeOf(l) + 1e-6) : qtyLabel(b.AvailableQty));
+  const amountOf = (l) => saleLineAmount({ quantity: l.qty, rate: l.price, discPercent: l.disc });
+  // What the row's quantity cost to buy: Quantity × Purchase Price (per pack or unit).
+  const costOf = (l) => round2((Number(l.qty) || 0) * (purchaseOf(l) || 0));
   const problemOf = (l) => {
-    if (!l.itemId) return null;
+    if (!l.itemId || l.loading) return null;
     const b = batchOfLine(l);
     if (!b) return { qty: 'No stock' };
     if (used.get(`${l.itemId}|${l.batch}`) > b.AvailableQty + 0.00005) return { qty: `Only ${stockIn(l, b)} ${l.saleUnit === 'unit' ? 'unit(s)' : 'pack(s)'} in stock` };
-    const mrp = round2(Number(itemById.get(l.itemId)?.MRP) / (l.saleUnit === 'unit' ? sizeOf(l) : 1));
+    const mrp = mrpOf(l) || 0;
     if (mrp > 0 && Number(l.price) > mrp) return { price: `Above MRP ${money(mrp)}` };
+    if (l.disc !== '' && !(Number(l.disc) >= 0 && Number(l.disc) <= 100)) return { disc: '0 to 100' };
+    // No selling below cost: the row's Amount must cover its purchase price.
+    if (Number(l.qty) > 0 && amountOf(l) < costOf(l)) return { amount: `Below cost ${money(costOf(l))}` };
     return null;
   };
   const changeUnit = (l, saleUnit) => setLine(l.key, { saleUnit, price: priceFor(l, l.packPrice, saleUnit) });
   const filled = lines.filter((l) => l.itemId);
-  const hasProblem = filled.some((l) => problemOf(l) || !(Number(l.qty) > 0) || !(Number(l.price) > 0));
-  const total = round2(filled.reduce((s, l) => s + round2((Number(l.qty) || 0) * (Number(l.price) || 0)), 0));
+  const billDiscBad = billDisc !== '' && !(Number(billDisc) >= 0 && Number(billDisc) <= 100);
+  const { subTotal, discountAmount, total } = saleBill(filled.map(amountOf), billDiscBad ? 0 : billDisc);
+  // The bill too: after its discount, the Total must cover the rows' purchase cost.
+  const totalCost = round2(filled.reduce((s, l) => s + costOf(l), 0));
+  const belowCost = filled.length > 0 && total < totalCost;
+  const hasProblem = billDiscBad || belowCost
+    || filled.some((l) => l.loading || problemOf(l) || !(Number(l.qty) > 0) || !(Number(l.price) > 0));
 
   const resetForm = () => {
     setEditingId(null);
     setLines([emptyLine()]);
     setCustomerName('');
     setMobileNo('');
+    setBillDisc('');
     setTransDate(today());
   };
 
@@ -126,12 +202,13 @@ export default function SalesBilling() {
         const saleUnit = l.SaleUnit === 'unit' ? 'unit' : 'pack';
         const size = Number(l.PackSize) || 1;
         const packPrice = String(batches.find((b) => b.Batch === batch)?.SelAmount ?? round2(Number(l.Rate) * (saleUnit === 'unit' ? size : 1)));
-        return { ...emptyLine(), itemId: String(l.ItemId), batches, batch, saleUnit, packPrice, qty: String(Number(l.UnitQty)), price: String(Number(l.Rate)) };
+        return { ...emptyLine(), itemId: String(l.ItemId), batches, batch, saleUnit, packPrice, qty: String(Number(l.UnitQty)), price: String(Number(l.Rate)), disc: Number(l.DiscPercent) ? String(Number(l.DiscPercent)) : '' };
       }));
       setEditingId(id);
       setTransDate(String(sale.TransDate).slice(0, 10));
       setCustomerName(sale.CustomerName || '');
       setMobileNo(sale.MobileNo || '');
+      setBillDisc(Number(sale.DiscPercent) ? String(Number(sale.DiscPercent)) : '');
       setLines(built.length ? built : [emptyLine()]);
     } catch {
       show('Failed to load sale for editing', 'error');
@@ -147,7 +224,7 @@ export default function SalesBilling() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const save = async (e) => {
+  const save = async (e, print = false) => {
     e.preventDefault();
     if (!transDate) return show('Date is required', 'error');
     if (!customerName.trim()) return show('Customer Name is required', 'error');
@@ -157,23 +234,32 @@ export default function SalesBilling() {
     setSaving(true);
     try {
       const payload = {
-        transDate, customerName, mobileNo,
-        items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, saleUnit: l.saleUnit, quantity: Number(l.qty), rate: Number(l.price) })),
+        transDate, customerName, mobileNo, discPercent: Number(billDisc) || 0,
+        items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, saleUnit: l.saleUnit, quantity: Number(l.qty), rate: Number(l.price), discPercent: Number(l.disc) || 0 })),
       };
+      const billOf = (saved) => ({
+        code: saved.Code, transDate, customerName,
+        lines: filled.map((l) => ({
+          itemName: `${itemById.get(l.itemId)?.Name || ''}${l.saleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.batch,
+          qty: Number(l.qty), rate: Number(l.price), disc: Number(l.disc) || 0, amount: amountOf(l),
+        })),
+        subTotal, discPercent: Number(billDisc) || 0, discountAmount,
+        total: Number(saved.TotalAmount),
+      });
+      const toList = () => navigate('/pharmacy/sales-billing-list', { state: { flash: 'Sale updated' } });
       if (editingId) {
-        await salesBillingApi.update(editingId, payload);
-        navigate('/pharmacy/sales-billing-list', { state: { flash: 'Sale updated' } });
+        const saved = await salesBillingApi.update(editingId, payload);
+        batchCache.current.clear();
+        if (print) {
+          setPrintBill(billOf(saved));
+          setPrintNow({ then: toList });
+        } else toList();
       } else {
         const saved = await salesBillingApi.create(payload);
+        batchCache.current.clear();
         show(`Saved ${saved.Code}`, 'success');
-        setPrintBill({
-          code: saved.Code, transDate, customerName,
-          lines: filled.map((l) => ({
-            itemName: `${itemById.get(l.itemId)?.Name || ''}${l.saleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.batch,
-            qty: Number(l.qty), rate: Number(l.price), amount: round2(Number(l.qty) * Number(l.price)),
-          })),
-          total: Number(saved.TotalAmount),
-        });
+        setPrintBill(billOf(saved));
+        if (print) setPrintNow({});
         resetForm();
       }
     } catch (err) {
@@ -183,8 +269,12 @@ export default function SalesBilling() {
     }
   };
 
-  const cell = 'border border-ink-200 px-1.5 py-1';
-  const box = 'w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-sm focus:border-brand-400 focus:bg-white focus:outline-none';
+  // Compact grid: one-line headings, short rows, light lines, and boxes that
+  // only show their border on hover / focus.
+  const cell = 'border-b border-r border-ink-100 px-1.5 py-0 align-middle';
+  const th = 'border-b border-r border-brand-100 px-1.5 py-1 text-[12px] font-semibold whitespace-nowrap';
+  const num = 'text-right tabular-nums';
+  const box = 'h-6 w-full rounded border border-transparent bg-transparent px-1 py-0 text-[13px] leading-6 hover:border-ink-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:hover:border-transparent';
 
   return (
     <div>
@@ -224,21 +314,25 @@ export default function SalesBilling() {
             </div>
           </div>
 
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[1000px] border-collapse text-left text-sm" {...gridKeys}>
+          <div className="mt-3 overflow-x-auto rounded-lg border border-ink-200 shadow-sm">
+            {/* Fixed column shares (adding up to 100%) so every heading stays on one line. */}
+            <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-[13px]" {...gridKeys}>
               <thead>
-                <tr className="bg-brand-50 font-bold text-brand-700">
-                  <th className={`${cell} w-8 text-center`}>#</th>
-                  <th className={`${cell} min-w-[220px]`}>Item Name</th>
-                  <th className={`${cell} w-60`}>Batch</th>
-                  <th className={`${cell} w-28`} title="Sell the whole pack, or single units of it">Sell by</th>
-                  <th className={`${cell} w-16`}>Rack</th>
-                  <th className={`${cell} w-16`}>Box</th>
-                  <th className={`${cell} w-16 text-right`}>Stock</th>
-                  <th className={`${cell} w-24 text-right`}>Sale Price</th>
-                  <th className={`${cell} w-24 text-right`}>Quantity</th>
-                  <th className={`${cell} w-24 text-right`}>Amount</th>
-                  <th className={`${cell} w-16`} />
+                <tr className="bg-gradient-to-b from-brand-50 to-brand-100/60 text-brand-800">
+                  <th className={`${th} w-[3%] text-center`}>#</th>
+                  <th className={`${th} w-[15.5%]`}>Item Name</th>
+                  <th className={`${th} w-[13.5%]`}>Batch</th>
+                  <th className={`${th} w-[9%]`} title="Sell the whole pack (units in it), or single units">Sell by</th>
+                  <th className={`${th} w-[4.5%] text-center`}>Rack</th>
+                  <th className={`${th} w-[4.5%] text-center`}>Box</th>
+                  <th className={`${th} w-[5.5%] text-right`}>Stock</th>
+                  <th className={`${th} w-[6%] text-right`} title="The batch's MRP, for one pack or one unit as picked in Sell by">MRP</th>
+                  <th className={`${th} w-[9%] text-right`} title="The batch's purchase price (P.Rate less Disc%), for one pack or one unit">Purchase Price</th>
+                  <th className={`${th} w-[7.5%] text-right`} title="Selling price, for one pack or one unit">Sale Price</th>
+                  <th className={`${th} w-[6%] text-right`}>Quantity</th>
+                  <th className={`${th} w-[5.5%] text-right`} title="Discount on this row: Amount = Quantity × Sale Price less Disc%">Disc%</th>
+                  <th className={`${th} w-[7%] text-right`} title="Quantity × Sale Price less Disc%">Amount</th>
+                  <th className={`${th} w-[4%] border-r-0`} />
                 </tr>
               </thead>
               <tbody>
@@ -247,8 +341,8 @@ export default function SalesBilling() {
                   const b = batchOfLine(l);
                   const problem = problemOf(l);
                   return (
-                    <tr key={l.key} className="align-top">
-                      <td className={`${cell} text-center text-ink-400`}>{r + 1}</td>
+                    <tr key={l.key} className="transition-colors even:bg-slate-50/60 hover:bg-brand-50/40">
+                      <td className={`${cell} text-center text-[12px] text-ink-400`}>{r + 1}</td>
                       <td className={cell}>
                         <SearchPick
                           className={box} data-r={r} data-c={0} placeholder="Search item..."
@@ -257,7 +351,8 @@ export default function SalesBilling() {
                       </td>
                       <td className={cell}>
                         <select
-                          className={box} data-r={r} data-c={1}
+                          className={box} data-r={r} data-c={1} data-own-updown
+                          onKeyDown={enterTo(() => setFocusAt({ key: l.key, c: 2 }))}
                           disabled={!l.itemId || l.loading || !l.batches.length}
                           value={l.batch ?? ''}
                           onChange={(e) => {
@@ -273,43 +368,58 @@ export default function SalesBilling() {
                       </td>
                       <td className={cell}>
                         <select
-                          className={box} data-r={r} data-c={2} disabled={!l.itemId}
+                          className={box} data-r={r} data-c={2} data-own-updown disabled={!l.itemId}
+                          onKeyDown={enterTo(() => setFocusAt({ key: l.key, c: 4 }))}
                           value={l.saleUnit} onChange={(e) => changeUnit(l, e.target.value)}
-                          title={l.itemId && sizeOf(l) <= 1 ? 'Set a pack count (e.g. 10\'s) on the item to sell single units' : ''}
+                          title={l.itemId && sizeOf(l) <= 1 ? 'Set the units in a pack (Type / Unit, e.g. 15) on the item to sell single units' : ''}
                         >
-                          <option value="pack">Pack{item?.Pack ? ` (${item.Pack})` : ''}</option>
+                          <option value="pack">Pack{l.itemId && sizeOf(l) > 1 ? ` (${sizeOf(l)})` : item?.Pack ? ` (${item.Pack})` : ''}</option>
                           <option value="unit" disabled={!!l.itemId && sizeOf(l) <= 1}>Unit</option>
                         </select>
                       </td>
-                      <td className={`${cell} font-bold text-brand-700`}>{item?.Rack || ''}</td>
-                      <td className={`${cell} font-bold text-brand-700`}>{item?.BoxNo || ''}</td>
-                      <td className={`${cell} text-right text-ink-600`}>{b ? stockIn(l, b) : ''}</td>
+                      <td className={`${cell} text-center`}>{item?.Rack && <span className="rounded bg-brand-50 px-1.5 py-px text-[11px] font-semibold text-brand-700 ring-1 ring-brand-100">{item.Rack}</span>}</td>
+                      <td className={`${cell} text-center`}>{item?.BoxNo && <span className="rounded bg-brand-50 px-1.5 py-px text-[11px] font-semibold text-brand-700 ring-1 ring-brand-100">{item.BoxNo}</span>}</td>
+                      <td className={`${cell} ${num} text-ink-600`}>{b ? stockIn(l, b) : ''}</td>
+                      <td className={`${cell} ${num} text-ink-500`}>{l.itemId && mrpOf(l) != null ? money(mrpOf(l)) : ''}</td>
+                      <td className={`${cell} ${num} text-ink-500`}>{l.itemId && purchaseOf(l) != null ? money(purchaseOf(l)) : ''}</td>
                       <td className={cell}>
                         <input
                           type="number" step="0.01" min="0" data-r={r} data-c={3}
-                          className={`${box} no-spin text-right ${problem?.price ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          className={`${box} no-spin text-right font-medium tabular-nums ${problem?.price ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={l.price} disabled={!l.itemId}
                           onChange={(e) => setLine(l.key, { price: e.target.value })}
+                          onKeyDown={enterTo(() => setFocusAt({ key: l.key, c: 4 }))}
                         />
                         {problem?.price && <p className="px-1 text-[11px] text-red-600">{problem.price}</p>}
-                        {l.itemId && l.packPrice !== '' && sizeOf(l) > 1 && (
-                          <p className="px-1 text-right text-[11px] text-ink-400">Pack {money(l.packPrice)} · Unit {money(Number(l.packPrice) / sizeOf(l))}</p>
-                        )}
                       </td>
                       <td className={cell}>
                         <input
                           type="number" step="1" min="0" data-r={r} data-c={4}
-                          className={`${box} no-spin text-right ${problem?.qty ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          className={`${box} no-spin text-right tabular-nums ${problem?.qty ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={l.qty} disabled={!l.itemId}
                           onChange={(e) => setLine(l.key, { qty: e.target.value })}
+                          onKeyDown={enterTo(() => setFocusAt({ key: l.key, c: 5 }))}
                         />
                         {problem?.qty && <p className="px-1 text-[11px] text-red-600">{problem.qty}</p>}
                       </td>
-                      <td className={`${cell} text-right`}>{l.itemId ? money((Number(l.qty) || 0) * (Number(l.price) || 0)) : ''}</td>
                       <td className={cell}>
-                        <div className="flex justify-center gap-0.5">
-                          <button type="button" className="rounded p-1 text-brand-600 hover:bg-brand-50" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={14} /></button>
-                          <button type="button" className="rounded p-1 text-red-500 hover:bg-red-50" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>
+                        <input
+                          type="number" step="0.01" min="0" max="100" data-r={r} data-c={5} placeholder={l.itemId ? '0' : ''}
+                          className={`${box} no-spin text-right tabular-nums ${problem?.disc ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          value={l.disc} disabled={!l.itemId}
+                          onChange={(e) => setLine(l.key, { disc: e.target.value })}
+                          onKeyDown={enterTo(() => nextItem(l.key))}
+                        />
+                        {problem?.disc && <p className="px-1 text-[11px] text-red-600">{problem.disc}</p>}
+                      </td>
+                      <td className={`${cell} ${num} font-semibold ${problem?.amount ? 'bg-red-50 text-red-700' : 'text-ink-900'}`} title={problem?.amount ? `Amount is below the purchase cost (${money(costOf(l))})` : undefined}>
+                        {l.itemId ? money(amountOf(l)) : ''}
+                        {problem?.amount && <p className="text-[11px] font-normal leading-tight text-red-600">{problem.amount}</p>}
+                      </td>
+                      <td className={`${cell} border-r-0 !px-0.5`}>
+                        <div className="flex justify-center">
+                          <button type="button" data-r={r} data-c={6} className="rounded p-0.5 text-brand-600 hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={14} /></button>
+                          <button type="button" data-r={r} data-c={7} className="rounded p-0.5 text-red-500 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>
@@ -317,18 +427,47 @@ export default function SalesBilling() {
                 })}
               </tbody>
               <tfoot>
-                <tr className="bg-ink-50 font-semibold">
-                  <td className={`${cell} text-right`} colSpan={9}>Total</td>
-                  <td className={`${cell} text-right`}>{money(total)}</td>
-                  <td className={cell} />
+                <tr className="text-ink-700">
+                  <td className="px-2 pt-1 text-right text-[12px] text-ink-500" colSpan={12}>Sub Total</td>
+                  <td className={`px-2 pt-1 ${num}`}>{money(subTotal)}</td>
+                  <td />
+                </tr>
+                <tr className="text-ink-700">
+                  <td className="px-2 py-0.5 text-right text-[12px] text-ink-500" colSpan={12}>
+                    <span className="inline-flex items-center gap-1.5">
+                      Bill Discount %
+                      <input
+                        type="number" step="0.01" min="0" max="100" placeholder="0"
+                        className={`h-6 w-20 rounded border bg-white px-1.5 py-0 text-right text-[13px] tabular-nums no-spin focus:outline-none focus:ring-2 ${billDiscBad || (belowCost && discountAmount > 0) ? 'border-red-400 bg-red-50 text-red-700 focus:ring-red-100' : 'border-ink-200 focus:border-brand-400 focus:ring-brand-100'}`}
+                        value={billDisc} onChange={(e) => setBillDisc(e.target.value)}
+                        title="Discount on the whole bill, taken off the Sub Total"
+                      />
+                    </span>
+                  </td>
+                  <td className={`px-2 py-0.5 ${num} ${discountAmount ? 'text-red-600' : 'text-ink-400'}`}>{discountAmount ? `− ${money(discountAmount)}` : money(0)}</td>
+                  <td />
+                </tr>
+                <tr className="border-t border-brand-100 bg-brand-50/70 font-semibold text-ink-800">
+                  <td className="px-2 py-1 text-right text-[12px] uppercase tracking-wide text-ink-500" colSpan={12}>
+                    {belowCost && !filled.some((l) => problemOf(l)?.amount) && <span className="mr-3 normal-case tracking-normal text-red-600">Total is below the purchase cost {money(totalCost)} — lower the Bill Discount</span>}
+                    Total
+                  </td>
+                  <td className={`px-2 py-1 ${num} text-[14px] font-bold ${belowCost ? 'text-red-600' : 'text-brand-800'}`}>{money(total)}</td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
 
-          <div className="mt-3 flex justify-end gap-2">
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <p className="mr-auto text-[12px] text-ink-400">
+              <kbd className="rounded border border-ink-200 bg-ink-50 px-1">Enter</kbd> moves Item → Batch → Sell by → Quantity → Disc% → next item. ↑ ↓ change the Batch / Sell by; ← → reach Sale Price.
+            </p>
             <button type="button" className="btn-secondary" onClick={() => (editingId ? navigate('/pharmacy/sales-billing-list') : resetForm())}>
               <X size={16} /> Cancel
+            </button>
+            <button type="button" className="btn-secondary" disabled={saving || hasProblem} title="Save the bill and print it" onClick={(e) => save(e, true)}>
+              <Printer size={16} /> {editingId ? 'Update & Print' : 'Save & Print'}
             </button>
             <button type="submit" className="btn-primary" disabled={saving || hasProblem}>
               <Save size={16} /> {saving ? 'Saving...' : editingId ? 'Update' : 'Save'}

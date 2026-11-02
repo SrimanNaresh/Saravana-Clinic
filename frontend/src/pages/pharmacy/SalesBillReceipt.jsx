@@ -6,9 +6,13 @@ import { PrescriptionPageSize } from '../../components/PrescriptionLetterhead.js
 // elsewhere hide everything else (see index.css's .no-print / aside / header).
 //
 //   clinic: { Name, ContactNo, Address, PageHeight, PageWidth } from clinicApi.get()
-//   bill:   { code, transDate, customerName, lines: [{itemName, batch, qty, rate, amount}], total }
+//   bill:   { code, transDate, customerName, lines: [{itemName, batch, qty, rate, disc, amount}],
+//             subTotal, discPercent, discountAmount, total }
+// The Disc% column and the Sub Total / Discount rows only print when used.
 export default function SalesBillReceipt({ clinic, bill }) {
   if (!bill) return null;
+  const rowDisc = bill.lines.some((l) => l.disc);
+  const span = rowDisc ? 5 : 4;
   return (
     <div className="hidden print:block">
       <PrescriptionPageSize height={clinic?.PageHeight} width={clinic?.PageWidth} />
@@ -43,6 +47,7 @@ export default function SalesBillReceipt({ clinic, bill }) {
                 <th className="py-2">Batch</th>
                 <th className="py-2 text-right">Qty</th>
                 <th className="py-2 text-right">Rate</th>
+                {rowDisc && <th className="py-2 text-right">Disc%</th>}
                 <th className="py-2 text-right">Amount</th>
               </tr>
             </thead>
@@ -53,11 +58,24 @@ export default function SalesBillReceipt({ clinic, bill }) {
                   <td className="py-2">{l.batch || '-'}</td>
                   <td className="py-2 text-right">{l.qty}</td>
                   <td className="py-2 text-right">{l.rate.toFixed(2)}</td>
+                  {rowDisc && <td className="py-2 text-right">{l.disc ? l.disc : '-'}</td>}
                   <td className="py-2 text-right">{l.amount.toFixed(2)}</td>
                 </tr>
               ))}
+              {bill.discountAmount > 0 && (
+                <>
+                  <tr className="text-ink-600">
+                    <td className="pt-2" colSpan={span}>Sub Total</td>
+                    <td className="pt-2 text-right">{bill.subTotal.toFixed(2)}</td>
+                  </tr>
+                  <tr className="text-ink-600">
+                    <td className="py-1" colSpan={span}>Discount ({bill.discPercent}%)</td>
+                    <td className="py-1 text-right">- {bill.discountAmount.toFixed(2)}</td>
+                  </tr>
+                </>
+              )}
               <tr className="text-base font-semibold text-ink-800">
-                <td className="py-2" colSpan={4}>Total</td>
+                <td className="py-2" colSpan={span}>Total</td>
                 <td className="py-2 text-right">{bill.total.toFixed(2)}</td>
               </tr>
             </tbody>

@@ -5,8 +5,9 @@ import { CardHeader, Toast } from '../../components/ui.jsx';
 import SearchPick from '../../components/grid/SearchPick.jsx';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { stockInApi, vendorApi } from '../../api/client.js';
-import { selAmount, purchaseLine, round2 } from '../../utils/purchaseCalc.js';
+import { selAmount, purchaseLine, round2, unitsPerPack } from '../../utils/purchaseCalc.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -98,6 +99,8 @@ export default function StockIn() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast, show } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
   const [vendors, setVendors] = useState([]);
   const [vendorId, setVendorId] = useState('');
   const [orders, setOrders] = useState([]);
@@ -109,16 +112,22 @@ export default function StockIn() {
   const [showRate, setShowRate] = useState(false);
   const [showGst, setShowGst] = useState(false);
   const extraCols = (showRate ? 1 : 0) + (showGst ? 2 : 0);
+  // Sel.Amount › adds a Unit Price column after it (Sel.Amount for one piece).
+  const [showUnit, setShowUnit] = useState(false);
   // Column shares (%) for each arrow state — every set adds up to 100, so the
   // table fits; Item Name and the dates give up room as columns open.
-  const W = {
+  const W0 = {
     chk: 2.5, pack: 3.5, unit: 3.5, mrp: 4.5, amount: 6.5, gstAmt: 6.5, pRate: 4.5, discP: 5.5,
     gst: 4, cgst: 4.5, sgst: 6, total: 5, rec: 5, rOrder: 5, disc: 4.5,
-    ...(!showRate && !showGst && { item: 16.5, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 6, sel: 6 }),
-    ...(showRate && !showGst && { item: 13, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 6, sel: 6 }),
-    ...(!showRate && showGst && { item: 9, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6, month: 6, sel: 6 }),
-    ...(showRate && showGst && { item: 8, ord: 4.5, free: 3.5, rFree: 4.5, batch: 4.5, month: 5.5, sel: 6 }),
+    ...(!showRate && !showGst && { item: 15.25, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 6, sel: 7.25 }),
+    ...(showRate && !showGst && { item: 11.75, ord: 4.5, free: 3.5, rFree: 4.5, batch: 6.5, month: 6, sel: 7.25 }),
+    ...(!showRate && showGst && { item: 8.5, ord: 4.5, free: 3.5, rFree: 4.5, batch: 5.25, month: 6, sel: 7.25 }),
+    ...(showRate && showGst && { item: 7.5, ord: 4.5, free: 3.5, rFree: 4.5, batch: 4.5, month: 5.125, sel: 7.25 }),
   };
+  // With Unit Price open every share is scaled down so the set still adds up to 100.
+  const W = showUnit
+    ? Object.fromEntries(Object.entries({ ...W0, unitPrice: 5.5 }).map(([k, v]) => [k, (v * 100) / 105.5]))
+    : W0;
   const w = (key) => ({ width: `${W[key]}%` });
   const [fill, setFill] = useState(emptyFill);
   const [editing, setEditing] = useState(null); // { id, no, locked }
@@ -149,11 +158,12 @@ export default function StockIn() {
   const pickVendor = (vid) => { setVendorId(vid); setOrderId(''); setRows([]); loadOrders(vid); };
   const pickOrder = (oid) => { setOrderId(oid); loadLines(oid); };
 
-  // A Stock In opened from the list.
+  // A Stock In opened from the list (Admin only, as the server also checks).
   useEffect(() => {
     const id = location.state?.editStockInId;
     if (!id) return;
     navigate(location.pathname, { replace: true, state: null });
+    if (!isAdmin) { show('Only an Admin can edit a Stock In', 'error'); return; }
     stockInApi.get(id).then(async (s) => {
       setEditing({ id: s.StockInId, no: s.StockInNo, locked: s.locked });
       setVendorId(String(s.VendorId));
@@ -235,6 +245,7 @@ export default function StockIn() {
   // group's colour, so it's clear which arrow opens which columns.
   const GROUP = {
     rate: { head: 'bg-sky-100 text-sky-800 border-t-2 border-t-sky-400', cell: 'bg-sky-50/70 text-sky-900', pill: 'bg-sky-100 text-sky-700 ring-sky-300 hover:bg-sky-200' },
+    sel: { head: 'bg-emerald-100 text-emerald-800 border-t-2 border-t-emerald-400', cell: 'bg-emerald-50/70 text-emerald-900', pill: 'bg-emerald-100 text-emerald-700 ring-emerald-300 hover:bg-emerald-200' },
     gst: { head: 'bg-amber-100 text-amber-800 border-t-2 border-t-amber-400', cell: 'bg-amber-50/70 text-amber-900', pill: 'bg-amber-100 text-amber-700 ring-amber-300 hover:bg-amber-200' },
   };
   const arrow = (group, open, onClick, title) => (
@@ -335,16 +346,20 @@ export default function StockIn() {
                   <th className={`${hd} ${al('month')}`} style={w('month')} title="Month the batch was made, as MM/YY">Mf.Date</th>
                   <th className={`${hd} ${al('month')}`} style={w('month')} title="Expiry month, as MM/YY">Exp.Date</th>
                   <th className={`${hd} ${al('disc')}`} style={w('disc')} title="Selling discount on MRP (Sel.Amount = MRP less this)">S.Disc%</th>
-                  <th className={`${hd} ${al('sel')}`} style={w('sel')}>Sel.Amount</th>
+                  <th className={`${hdArrow} ${al('sel')}`} style={w('sel')} title="Selling price for one pack">
+                    <span>Sel.Amount</span>{arrow('sel', showUnit, () => setShowUnit((v) => !v), showUnit ? 'Hide the unit price' : 'Show the unit price')}
+                  </th>
+                  {showUnit && <th className={`${hd} ${GROUP.sel.head} ${al('unitPrice')}`} style={w('unitPrice')} title="Sel.Amount for one piece (Sel.Amount ÷ units in the pack)">Unit Price</th>}
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
-                  <tr><td className={`${cell} px-3 py-4 text-center text-ink-400`} colSpan={18 + extraCols}>{orderId ? 'Loading the order…' : 'Pick a vendor and a purchase order to list its items.'}</td></tr>
+                  <tr><td className={`${cell} px-3 py-4 text-center text-ink-400`} colSpan={18 + extraCols + (showUnit ? 1 : 0)}>{orderId ? 'Loading the order…' : 'Pick a vendor and a purchase order to list its items.'}</td></tr>
                 )}
                 {rows.map((r, i) => {
                   const p = problems[i] || {};
                   const sel = selAmount({ mrp: r.MRP, discPercent: r.disc });
+                  const n = unitsPerPack(r.Pack, r.Unit);
                   const skipped = Number(r.qty || 0) === 0 && Number(r.free || 0) === 0;
                   const msg = Object.values(p)[0];
                   const oc = orderCalc(r);
@@ -394,6 +409,12 @@ export default function StockIn() {
                       <td className={`${cell} !px-0`}><MonthBox data-r={i} data-c={5} className={`${box} text-center ${p.exp ? bad : ''}`} value={r.exp} onChange={(v) => setRow(i, { exp: v })} /></td>
                       <td className={`${cell} !px-0`}><input type="number" min="0" max="100" step="0.01" data-r={i} data-c={6} className={`${box} no-spin text-right ${p.disc ? bad : ''}`} value={r.disc} onChange={(e) => setRow(i, { disc: e.target.value })} /></td>
                       <td className={`${cell} px-1 text-right font-semibold text-ink-800`}>{money(sel)}</td>
+                      {showUnit && (
+                        <td className={`${cell} px-1 text-right ${GROUP.sel.cell}`} title={`${money(sel)} ÷ ${n} units`}>
+                          <span className="font-semibold">{money(round2(sel / n))}</span>
+                          <p className="text-[11px] text-emerald-700/70">÷ {n}</p>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -403,7 +424,7 @@ export default function StockIn() {
                   <tr className="bg-ink-50 font-semibold">
                     <td className={`${cell} px-2 text-right`} colSpan={7 + extraCols}>Sum of Total</td>
                     <td className={`${cell} px-1 text-right text-ink-900`}>{money(orderTotal)}</td>
-                    <td className={cell} colSpan={10} />
+                    <td className={cell} colSpan={10 + (showUnit ? 1 : 0)} />
                   </tr>
                 </tfoot>
               )}
@@ -412,7 +433,7 @@ export default function StockIn() {
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-ink-500">
-              Received = R.Order + R.Free and starts at what's still due; typing it splits into R.Order first, then R.Free. Both go into stock, only R.Order is charged. Rows with nothing received are skipped. Sel.Amount = MRP less S.Disc% (selling discount).
+              Received = R.Order + R.Free and starts at what's still due; typing it splits into R.Order first, then R.Free. Both go into stock, only R.Order is charged. Rows with nothing received are skipped. Sel.Amount = MRP less S.Disc% (selling discount); Sel.Amount › shows the Unit Price, Sel.Amount ÷ the units in the pack.
             </p>
             <div className="flex gap-2">
               <button type="button" className="btn-secondary" onClick={() => (editing ? navigate('/pharmacy/stock-in-list') : reset())}><X size={16} /> Cancel</button>

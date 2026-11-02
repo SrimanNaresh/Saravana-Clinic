@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { batchStock } from '../utils/batchStock.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
-import { packSize } from '../utils/purchaseCalc.js';
+import { unitsPerPack, saleLineAmount, saleBill } from '../utils/purchaseCalc.js';
 
 // Pharmacy > Sales: counter sales, each line sold from one batch, by the Pack
 // or by the Unit (one piece; price and quantity per piece). Stock is never
@@ -63,7 +63,7 @@ router.get('/batches/:itemId', async (req, res) => {
 });
 
 const LINES_SQL = `
-  SELECT l.LineId, l.ItemId, i.Name AS ItemName, l.Batch, l.ExpiryDate, l.Quantity, l.Rate, l.Amount,
+  SELECT l.LineId, l.ItemId, i.Name AS ItemName, l.Batch, l.ExpiryDate, l.Quantity, l.Rate, l.Amount, ISNULL(l.DiscPercent, 0) AS DiscPercent,
          ISNULL(l.SaleUnit, 'pack') AS SaleUnit, ISNULL(l.UnitQty, l.Quantity) AS UnitQty, ISNULL(l.PackSize, 1) AS PackSize,
          i.Rack, i.BoxNo, i.MRP, i.SellPrice, i.Pack
   FROM SalesBillingItem l
@@ -86,7 +86,8 @@ router.get('/:id', async (req, res) => {
   try {
     const pool = await getPool();
     const head = await pool.request().input('id', sql.Int, req.params.id).query(`
-      SELECT h.SalesBillingId, ${CODE} AS Code, h.TransDate, h.CustomerName, h.MobileNo, h.TotalAmount
+      SELECT h.SalesBillingId, ${CODE} AS Code, h.TransDate, h.CustomerName, h.MobileNo, h.TotalAmount,
+             ISNULL(h.SubTotal, h.TotalAmount) AS SubTotal, ISNULL(h.DiscPercent, 0) AS DiscPercent, ISNULL(h.DiscountAmount, 0) AS DiscountAmount
       FROM SalesBilling h WHERE h.SalesBillingId = @id AND h.IsActive = 1
     `);
     if (!head.recordset.length) return res.status(404).json({ error: 'Sale not found' });
@@ -98,7 +99,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Checks a sale body against the database. Returns { error } or the cleaned
-// { transDate, customerName, mobileNo, lines, total }. Amounts are worked out
+// { transDate, customerName, mobileNo, lines, subTotal, discPercent, discountAmount, total }. Amounts are worked out
 // here, never taken from the screen. Runs inside the save's transaction so
 // the stock it checks can't change before the save.
 async function checkSale(tx, body, saleId) {
@@ -119,8 +120,9 @@ async function checkSale(tx, body, saleId) {
   if (itemIds.length) {
     const found = await new sql.Request(tx)
       .input('ids', sql.NVarChar(sql.MAX), [...new Set(itemIds)].join(','))
-      .query(`SELECT ItemId, Name, MRP, Pack FROM PharmacyItem
-              WHERE IsActive = 1 AND ItemId IN (SELECT CAST(value AS INT) FROM STRING_SPLIT(@ids, ','))`);
+      .query(`SELECT i.ItemId, i.Name, i.MRP, i.PurchaseRate, i.Pack, u.Name AS UnitName FROM PharmacyItem i
+              LEFT JOIN UnitMaster u ON u.UnitId = i.UnitId
+              WHERE i.IsActive = 1 AND i.ItemId IN (SELECT CAST(value AS INT) FROM STRING_SPLIT(@ids, ','))`);
     for (const r of found.recordset) items.set(r.ItemId, r);
   }
   const batches = await batchStock(new sql.Request(tx), itemIds, { excludeSaleId: saleId });
@@ -136,13 +138,21 @@ async function checkSale(tx, body, saleId) {
     const b = batchOf(item.ItemId, batch);
     if (!b) return { error: `${row} (${item.Name}): pick a batch that has stock` };
     const saleUnit = it.saleUnit === 'unit' ? 'unit' : 'pack';
-    const size = saleUnit === 'unit' ? packSize(item.Pack) : 1;
+    const size = saleUnit === 'unit' ? unitsPerPack(item.Pack, item.UnitName) : 1;
     const qty = Number(it.quantity);
     if (!(qty > 0)) return { error: `${row} (${item.Name}): Quantity must be more than 0` };
     const price = Number(it.rate);
     if (!(price > 0)) return { error: `${row} (${item.Name}): Sale Price must be more than 0` };
-    const mrp = round2(Number(item.MRP) / size);
+    // The batch's own MRP when its Stock In recorded one, else the item's.
+    const disc = it.discPercent === '' || it.discPercent == null ? 0 : Number(it.discPercent);
+    if (!(disc >= 0 && disc <= 100)) return { error: `${row} (${item.Name}): Disc % must be 0 to 100` };
+    const mrp = round2(Number(b.MRP ?? item.MRP) / size);
     if (mrp > 0 && price > mrp) return { error: `${row} (${item.Name}): Sale Price can't be above MRP ${mrp.toFixed(2)}${saleUnit === 'unit' ? ' per unit' : ''}` };
+    // No selling below cost: the row's Amount must cover Quantity × its
+    // purchase price (the batch's Stock In rate, else the item's).
+    const amount = saleLineAmount({ quantity: qty, rate: price, discPercent: disc });
+    const cost = round2(qty * round2(Number(b.PurchaseRate ?? item.PurchaseRate ?? 0) / size));
+    if (amount < cost) return { error: `${row} (${item.Name}): Amount ${amount.toFixed(2)} is below the purchase cost ${cost.toFixed(2)}` };
     const packs = round4(qty / size);
     const key = `${item.ItemId}|${batch}`;
     wanted.set(key, (wanted.get(key) || 0) + packs);
@@ -150,12 +160,16 @@ async function checkSale(tx, body, saleId) {
       return { error: `${item.Name}${batch ? ` batch ${batch}` : ''}: only ${round2(b.AvailableQty)} pack(s) in stock` };
     }
     lines.push({
-      itemId: item.ItemId, batch: batch || null, expiryDate: b.ExpiryDate, qty: packs, rate: round2(price), amount: round2(qty * price),
+      itemId: item.ItemId, batch: batch || null, expiryDate: b.ExpiryDate, qty: packs, rate: round2(price), discPercent: disc, amount, cost,
       saleUnit, unitQty: qty, packSize: size,
     });
   }
-  const total = round2(lines.reduce((s, l) => s + l.amount, 0));
-  return { transDate, customerName, mobileNo: mobileNo || null, lines, total };
+  const discPercent = body.discPercent === '' || body.discPercent == null ? 0 : Number(body.discPercent);
+  if (!(discPercent >= 0 && discPercent <= 100)) return { error: 'Bill Discount % must be 0 to 100' };
+  const bill = saleBill(lines.map((l) => l.amount), discPercent);
+  const totalCost = round2(lines.reduce((s, l) => s + l.cost, 0));
+  if (bill.total < totalCost) return { error: `Total ${bill.total.toFixed(2)} is below the purchase cost ${totalCost.toFixed(2)}: lower the Bill Discount` };
+  return { transDate, customerName, mobileNo: mobileNo || null, lines, discPercent, ...bill };
 }
 
 async function insertLines(tx, saleId, lines) {
@@ -165,14 +179,15 @@ async function insertLines(tx, saleId, lines) {
       .input('itemId', sql.Int, l.itemId)
       .input('qty', sql.Decimal(12, 4), l.qty)
       .input('rate', sql.Decimal(10, 2), l.rate)
+      .input('disc', sql.Decimal(5, 2), l.discPercent)
       .input('amount', sql.Decimal(12, 2), l.amount)
       .input('batch', sql.NVarChar(100), l.batch)
       .input('expiry', sql.Date, l.expiryDate)
       .input('saleUnit', sql.NVarChar(10), l.saleUnit)
       .input('unitQty', sql.Decimal(10, 2), l.unitQty)
       .input('packSize', sql.Int, l.packSize)
-      .query(`INSERT INTO SalesBillingItem (SalesBillingId, ItemId, Quantity, Rate, Amount, Batch, ExpiryDate, SaleUnit, UnitQty, PackSize)
-              VALUES (@id, @itemId, @qty, @rate, @amount, @batch, @expiry, @saleUnit, @unitQty, @packSize)`);
+      .query(`INSERT INTO SalesBillingItem (SalesBillingId, ItemId, Quantity, Rate, DiscPercent, Amount, Batch, ExpiryDate, SaleUnit, UnitQty, PackSize)
+              VALUES (@id, @itemId, @qty, @rate, @disc, @amount, @batch, @expiry, @saleUnit, @unitQty, @packSize)`);
   }
 }
 
@@ -192,11 +207,15 @@ async function saveSale(req, res, saleId) {
       .input('transDate', sql.Date, sale.transDate)
       .input('customer', sql.NVarChar(200), sale.customerName)
       .input('mobile', sql.NVarChar(20), sale.mobileNo)
+      .input('subTotal', sql.Decimal(12, 2), sale.subTotal)
+      .input('disc', sql.Decimal(5, 2), sale.discPercent)
+      .input('discAmt', sql.Decimal(12, 2), sale.discountAmount)
       .input('total', sql.Decimal(12, 2), sale.total);
     let id = saleId;
     if (saleId) {
       const upd = await head.input('id', sql.Int, saleId).query(`
-        UPDATE SalesBilling SET TransDate = @transDate, CustomerName = @customer, MobileNo = @mobile, TotalAmount = @total
+        UPDATE SalesBilling SET TransDate = @transDate, CustomerName = @customer, MobileNo = @mobile, TotalAmount = @total,
+            SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt
         WHERE SalesBillingId = @id AND IsActive = 1`);
       if (!upd.rowsAffected[0]) {
         await tx.rollback();
@@ -205,9 +224,9 @@ async function saveSale(req, res, saleId) {
       await new sql.Request(tx).input('id', sql.Int, saleId).query('DELETE FROM SalesBillingItem WHERE SalesBillingId = @id');
     } else {
       const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null).query(`
-        INSERT INTO SalesBilling (TransDate, CustomerName, MobileNo, TotalAmount, CreatedBy)
+        INSERT INTO SalesBilling (TransDate, CustomerName, MobileNo, TotalAmount, SubTotal, DiscPercent, DiscountAmount, CreatedBy)
         OUTPUT INSERTED.SalesBillingId
-        VALUES (@transDate, @customer, @mobile, @total, @by)`);
+        VALUES (@transDate, @customer, @mobile, @total, @subTotal, @disc, @discAmt, @by)`);
       id = ins.recordset[0].SalesBillingId;
     }
     await insertLines(tx, id, sale.lines);

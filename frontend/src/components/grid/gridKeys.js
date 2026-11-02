@@ -5,8 +5,11 @@
 //  - ↑ / ↓ go to the same column in the row above / below (number boxes
 //    never step their value).
 //  - Arriving in a number box selects its value.
-// A box with `data-picker-open="true"` (an open SearchPick list) keeps ↑ / ↓
-// for itself. Disabled boxes are skipped.
+//  - Row buttons (e.g. + / delete) with data-r / data-c join in, so the
+//    arrows reach them and Enter / Space presses them.
+// A box with `data-picker-open="true"` (an open SearchPick list) or
+// `data-own-updown` (e.g. a Batch dropdown that ↑ / ↓ step through) keeps
+// ↑ / ↓ for itself. Disabled boxes are skipped.
 
 const cellAt = (root, r, c) => root.querySelector(`[data-r="${r}"][data-c="${c}"]:not(:disabled)`);
 
@@ -47,7 +50,7 @@ function onKeyDown(e) {
   const c = Number(el.dataset.c);
 
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-    if (el.dataset.pickerOpen === 'true') return;
+    if (el.dataset.pickerOpen === 'true' || el.dataset.ownUpdown != null) return;
     e.preventDefault();
     const next = cellAt(root, r + (e.key === 'ArrowUp' ? -1 : 1), c);
     if (next) focusCell(next);

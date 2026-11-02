@@ -59,7 +59,11 @@ export default function SalesBillingList() {
       const sale = await salesBillingApi.get(row.SalesBillingId);
       setPrintBill({
         code: sale.Code, transDate: sale.TransDate, customerName: sale.CustomerName,
-        lines: sale.lines.map((l) => ({ itemName: l.ItemName, batch: l.Batch, qty: Number(l.Quantity), rate: Number(l.Rate), amount: Number(l.Amount) })),
+        lines: sale.lines.map((l) => ({
+          itemName: `${l.ItemName}${l.SaleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.Batch,
+          qty: Number(l.UnitQty), rate: Number(l.Rate), disc: Number(l.DiscPercent) || 0, amount: Number(l.Amount),
+        })),
+        subTotal: Number(sale.SubTotal), discPercent: Number(sale.DiscPercent) || 0, discountAmount: Number(sale.DiscountAmount) || 0,
         total: Number(sale.TotalAmount),
       });
     } catch {

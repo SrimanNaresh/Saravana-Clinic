@@ -613,6 +613,17 @@ IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='MobileNo' AND Object_ID=Obj
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='CreatedBy' AND Object_ID=Object_ID('SalesBilling'))
     ALTER TABLE SalesBilling ADD CreatedBy NVARCHAR(100) NULL;
 
+-- Sales discounts: a Disc % per row (its Amount is after it) and one for the
+-- bill, taken off the rows' Sub Total (TotalAmount = SubTotal - DiscountAmount).
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscPercent' AND Object_ID=Object_ID('SalesBillingItem'))
+    ALTER TABLE SalesBillingItem ADD DiscPercent DECIMAL(5,2) NOT NULL CONSTRAINT DF_SalesBillingItem_DiscPercent DEFAULT 0;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SubTotal' AND Object_ID=Object_ID('SalesBilling'))
+    ALTER TABLE SalesBilling ADD SubTotal DECIMAL(12,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscPercent' AND Object_ID=Object_ID('SalesBilling'))
+    ALTER TABLE SalesBilling ADD DiscPercent DECIMAL(5,2) NOT NULL CONSTRAINT DF_SalesBilling_DiscPercent DEFAULT 0;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscountAmount' AND Object_ID=Object_ID('SalesBilling'))
+    ALTER TABLE SalesBilling ADD DiscountAmount DECIMAL(12,2) NOT NULL CONSTRAINT DF_SalesBilling_DiscountAmount DEFAULT 0;
+
 -- Stock changes that have no document of their own: an item's opening stock
 -- and quantity adjustments. Purchases, returns and sales are read from their
 -- own tables, so the Stock Report's history is this table plus those.
@@ -979,6 +990,24 @@ async function init() {
       SELECT DISTINCT LTRIM(RTRIM(i.Potency)) FROM PharmacyItem i
       WHERE i.IsActive = 1 AND LTRIM(RTRIM(ISNULL(i.Potency, ''))) <> ''
         AND NOT EXISTS (SELECT * FROM PotencyMaster p WHERE LOWER(p.Name) = LOWER(LTRIM(RTRIM(i.Potency))));
+    `);
+
+    // Indexes for the batch stock lookup (utils/batchStock.js), which searches
+    // every received / returned / sold line by item when an item is picked on
+    // Sales. Run on their own, after the schema, so every table and column exists.
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='IX_StockInItem_ItemId')
+          CREATE INDEX IX_StockInItem_ItemId ON StockInItem (ItemId) INCLUDE (StockInId, BatchNo, ExpDate, Quantity, FreeQty);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='IX_StockReturnItem_ItemId')
+          CREATE INDEX IX_StockReturnItem_ItemId ON StockReturnItem (ItemId) INCLUDE (StockReturnId, BatchNo, Quantity);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='IX_SalesBillingItem_ItemId')
+          CREATE INDEX IX_SalesBillingItem_ItemId ON SalesBillingItem (ItemId) INCLUDE (SalesBillingId, Batch, Quantity);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='IX_PurchaseInvoiceItem_ItemId')
+          CREATE INDEX IX_PurchaseInvoiceItem_ItemId ON PurchaseInvoiceItem (ItemId) INCLUDE (PurchaseInvoiceId, Batch, ExpiryDate, Quantity);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='IX_PurchaseReturnItem_ItemId')
+          CREATE INDEX IX_PurchaseReturnItem_ItemId ON PurchaseReturnItem (ItemId) INCLUDE (PurchaseReturnId, Batch, Quantity);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='IX_StockInward_ItemId')
+          CREATE INDEX IX_StockInward_ItemId ON StockInward (ItemId) INCLUDE (Batch, ExpiryDate, Quantity, IsActive);
     `);
 
     // Seed the default Admin user only if it doesn't already exist.

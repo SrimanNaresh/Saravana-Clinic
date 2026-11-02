@@ -25,7 +25,19 @@ export default function SearchPick({ options, value, onChange, footer, className
   const chosen = options.find((o) => String(o.value) === String(value));
   const sorted = useMemo(() => [...options].sort((a, b) => a.label.localeCompare(b.label)), [options]);
   const q = typed ? text.trim().toLowerCase() : '';
-  const shown = (q ? sorted.filter((o) => o.label.toLowerCase().includes(q)) : sorted).slice(0, MAX_SHOWN);
+  // Names starting with what's typed come first, then those containing it.
+  const shown = useMemo(() => {
+    if (!q) return sorted.slice(0, MAX_SHOWN);
+    const starts = [];
+    const has = [];
+    for (const o of sorted) {
+      const label = o.label.toLowerCase();
+      if (label.startsWith(q)) starts.push(o);
+      else if (label.includes(q)) has.push(o);
+      if (starts.length >= MAX_SHOWN) break;
+    }
+    return [...starts, ...has].slice(0, MAX_SHOWN);
+  }, [q, sorted]);
   const rows = footer ? [...shown, { footer: true }] : shown;
 
   // Shows the chosen name whenever the box isn't being typed in.

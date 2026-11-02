@@ -38,3 +38,24 @@ export function packSize(pack) {
   const count = /^(\d+)\s*('?s|tabs?|tablets?|caps?|capsules?|nos|pcs?|pieces?)?$/.exec(s);
   return count ? Math.max(1, Number(count[1])) : 1;
 }
+
+// Pieces in one pack for a unit price. Item Master keeps the count in Type /
+// Unit ("15" = 15 tablets a strip); when Unit isn't a count, the Pack text is
+// read instead ("10's", "1x15"), and anything else counts as 1.
+export function unitsPerPack(pack, unit) {
+  const n = Number(String(unit ?? '').trim());
+  return Number.isFinite(n) && n > 0 ? n : packSize(pack);
+}
+
+// Sales discounts. A row's Amount is Quantity x Sale Price less its Disc %;
+// the bill's Discount % then comes off the rows' Sub Total.
+//   e.g. 2 x 32.12 = 64.24, Disc 10 % -> 57.82; bill Disc 5 % of 57.82 -> 2.89, Total 54.93
+export function saleLineAmount({ quantity, rate, discPercent }) {
+  const gross = round2(num(quantity) * num(rate));
+  return round2(gross - (gross * num(discPercent)) / 100);
+}
+export function saleBill(amounts, discPercent) {
+  const subTotal = round2(amounts.reduce((s, a) => s + num(a), 0));
+  const discountAmount = round2((subTotal * num(discPercent)) / 100);
+  return { subTotal, discountAmount, total: round2(subTotal - discountAmount) };
+}
