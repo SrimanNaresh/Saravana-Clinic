@@ -322,6 +322,43 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// Delete (Admin only): hides an item that no order, Stock In, return or bill
+// uses and that has no stock. One already used can't be deleted, so its
+// documents still show it; set it Inactive instead to keep it out of the pickers.
+const ITEM_USED_IN = [
+  ['PurchaseOrderItem', 'purchase order'], ['StockInItem', 'Stock In'], ['StockReturnItem', 'stock return'],
+  ['SalesBillingItem', 'sales bill'], ['SalesReturnItem', 'sales return'], ['PurchaseInvoiceItem', 'purchase invoice'],
+  ['PurchaseReturnItem', 'purchase return'], ['StockInward', 'stock inward'],
+];
+router.delete('/:id', async (req, res) => {
+  if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete an item' });
+  const itemId = Number(req.params.id);
+  if (!Number.isInteger(itemId) || itemId <= 0) return res.status(400).json({ error: 'Bad item id' });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('itemId', sql.Int, itemId).query(`
+      SELECT i.Name, ISNULL(st.CurrentStock, 0) AS Stock,
+             ${ITEM_USED_IN.map(([t], k) => `(SELECT COUNT(*) FROM ${t} WHERE ItemId = @itemId) AS u${k}`).join(', ')}
+      FROM PharmacyItem i
+      LEFT JOIN (${CURRENT_STOCK}) st ON st.ItemId = i.ItemId
+      WHERE i.ItemId = @itemId AND i.IsActive = 1`);
+    const row = r.recordset[0];
+    if (!row) return res.status(404).json({ error: 'Item not found' });
+    const used = ITEM_USED_IN.filter((_, k) => row[`u${k}`] > 0).map(([, label]) => label);
+    if (used.length) {
+      return res.status(409).json({ error: `${row.Name} is used in ${used.join(', ')} — it can't be deleted. Set its Status to Inactive instead.` });
+    }
+    if (Number(row.Stock) !== 0) {
+      return res.status(409).json({ error: `${row.Name} has ${Number(row.Stock)} in stock — it can't be deleted. Set its Status to Inactive instead.` });
+    }
+    await pool.request().input('itemId', sql.Int, itemId)
+      .query('UPDATE PharmacyItem SET IsActive = 0, EditedAt = GETDATE() WHERE ItemId = @itemId');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Bulk Update: saves every changed row in one go, or none of them. Each row is
 // { itemId, ...only the fields that changed }. Bad rows come back as
 // { errors: [{ itemId, name, error }] } and nothing is saved.

@@ -47,6 +47,7 @@ import SalesBilling from './pages/pharmacy/SalesBilling.jsx';
 import SalesBillingList from './pages/pharmacy/SalesBillingList.jsx';
 import StockReport from './pages/pharmacy/StockReport.jsx';
 import VendorPayments from './pages/pharmacy/VendorPayments.jsx';
+import VendorPaymentEntry from './pages/pharmacy/VendorPaymentEntry.jsx';
 import PatientRecords from './pages/reports/PatientRecords.jsx';
 import FollowUpPatients from './pages/reports/FollowUpPatients.jsx';
 import PrescriptionPrint from './pages/confirm/PrescriptionPrint.jsx';
@@ -172,6 +173,7 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/return-list" element={<StockReturnList />} />
               <Route path="/pharmacy/vendor-master" element={<VendorMaster />} />
               <Route path="/pharmacy/vendor-list" element={<VendorList />} />
+              <Route path="/pharmacy/vendor-payment" element={<VendorPaymentEntry />} />
               <Route path="/pharmacy/sales-billing" element={<SalesBilling />} />
               <Route path="/pharmacy/sales-billing-list" element={<SalesBillingList />} />
               <Route path="/pharmacy/stock-report" element={<StockReport />} />

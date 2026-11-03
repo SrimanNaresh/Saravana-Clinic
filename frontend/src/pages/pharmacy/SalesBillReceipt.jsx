@@ -7,7 +7,7 @@ import { PrescriptionPageSize } from '../../components/PrescriptionLetterhead.js
 //
 //   clinic: { Name, ContactNo, Address, PageHeight, PageWidth } from clinicApi.get()
 //   bill:   { code, transDate, customerName, lines: [{itemName, batch, qty, rate, disc, amount}],
-//             subTotal, discPercent, discountAmount, total }
+//             subTotal, discPercent, discountAmount, roundOff?, total }
 // The Disc% column and the Sub Total / Discount rows only print when used.
 export default function SalesBillReceipt({ clinic, bill }) {
   if (!bill) return null;
@@ -73,6 +73,12 @@ export default function SalesBillReceipt({ clinic, bill }) {
                     <td className="py-1 text-right">- {bill.discountAmount.toFixed(2)}</td>
                   </tr>
                 </>
+              )}
+              {Number(bill.roundOff) !== 0 && !Number.isNaN(Number(bill.roundOff)) && (
+                <tr className="text-ink-600">
+                  <td className="py-1" colSpan={span}>Round Off</td>
+                  <td className="py-1 text-right">{Number(bill.roundOff) > 0 ? '+ ' : '- '}{Math.abs(Number(bill.roundOff)).toFixed(2)}</td>
+                </tr>
               )}
               <tr className="text-base font-semibold text-ink-800">
                 <td className="py-2" colSpan={span}>Total</td>

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
-import { purchaseLine, round2 } from '../utils/purchaseCalc.js';
+import { purchaseLine, round2, roundOffOf } from '../utils/purchaseCalc.js';
 
 // Pharmacy > Purchase / Order: orders placed with a vendor. An order doesn't
 // change stock. Every amount is worked out here with the same formulas the
@@ -66,7 +66,7 @@ router.get('/:id', async (req, res) => {
   try {
     const pool = await getPool();
     const head = await pool.request().input('id', sql.Int, req.params.id).query(`
-      SELECT h.PurchaseOrderId, ${ORDER_NO} AS OrderNo, h.OrderDate, h.VendorId, v.VendorName, h.VendorDetails, h.TotalAmount
+      SELECT h.PurchaseOrderId, ${ORDER_NO} AS OrderNo, h.OrderDate, h.VendorId, v.VendorName, h.VendorDetails, h.TotalAmount, h.RoundOff
       FROM PurchaseOrder h JOIN Vendor v ON v.VendorId = h.VendorId
       WHERE h.PurchaseOrderId = @id AND h.IsActive = 1`);
     if (!head.recordset.length) return res.status(404).json({ error: 'Order not found' });
@@ -148,8 +148,10 @@ async function checkOrder(pool, body, orderId) {
       : { name: item.Name, generic: item.GenericName, manufacturer: item.Manufacturer, hsn: item.HSNCode, category: item.Category, pack: item.Pack, unit: item.Unit };
     lines.push({ itemId: item.ItemId, ...copy, mrp, pRate, free, disc, qty, cgst, sgst, ...calc });
   }
-  const total = round2(lines.reduce((s, l) => s + l.total, 0));
-  return { orderDate, vendorId, vendorDetails, lines, total };
+  const sum = round2(lines.reduce((s, l) => s + l.total, 0));
+  // body.roundOff: true rounds the Sum of Total to the nearest rupee.
+  const roundOff = body.roundOff ? roundOffOf(sum) : 0;
+  return { orderDate, vendorId, vendorDetails, lines, roundOff, total: round2(sum + roundOff) };
 }
 
 async function insertLines(tx, orderId, lines) {
@@ -199,11 +201,12 @@ async function saveOrder(req, res, orderId) {
       .input('date', sql.Date, o.orderDate)
       .input('vendorId', sql.Int, o.vendorId)
       .input('details', sql.NVarChar(1000), o.vendorDetails)
-      .input('total', sql.Decimal(12, 2), o.total);
+      .input('total', sql.Decimal(12, 2), o.total)
+      .input('roundOff', sql.Decimal(10, 2), o.roundOff);
     let id = orderId;
     if (orderId) {
       const upd = await head.input('id', sql.Int, orderId).query(`
-        UPDATE PurchaseOrder SET OrderDate = @date, VendorId = @vendorId, VendorDetails = @details, TotalAmount = @total
+        UPDATE PurchaseOrder SET OrderDate = @date, VendorId = @vendorId, VendorDetails = @details, TotalAmount = @total, RoundOff = @roundOff
         WHERE PurchaseOrderId = @id AND IsActive = 1`);
       if (!upd.rowsAffected[0]) {
         await tx.rollback();
@@ -212,8 +215,8 @@ async function saveOrder(req, res, orderId) {
       await new sql.Request(tx).input('id', sql.Int, orderId).query('DELETE FROM PurchaseOrderItem WHERE PurchaseOrderId = @id');
     } else {
       const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null).query(`
-        INSERT INTO PurchaseOrder (OrderDate, VendorId, VendorDetails, TotalAmount, CreatedBy)
-        OUTPUT INSERTED.PurchaseOrderId VALUES (@date, @vendorId, @details, @total, @by)`);
+        INSERT INTO PurchaseOrder (OrderDate, VendorId, VendorDetails, TotalAmount, RoundOff, CreatedBy)
+        OUTPUT INSERTED.PurchaseOrderId VALUES (@date, @vendorId, @details, @total, @roundOff, @by)`);
       id = ins.recordset[0].PurchaseOrderId;
     }
     await insertLines(tx, id, o.lines);

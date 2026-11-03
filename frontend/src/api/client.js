@@ -148,6 +148,8 @@ export const itemMasterApi = {
   get: (id) => api.get(`/item-master/${id}`).then((r) => r.data),
   create: (data) => api.post('/item-master', data).then((r) => r.data),
   update: (id, data) => api.put(`/item-master/${id}`, data).then((r) => r.data),
+  // Admin only; refused for an item used in any document or with stock
+  remove: (id) => api.delete(`/item-master/${id}`).then((r) => r.data),
   // rows: [{ itemId, ...changed fields }]; all saved or none
   bulkUpdate: (rows) => api.post('/item-master/bulk-update', { rows }).then((r) => r.data),
   // Pick-lists: { unit, generic, manufacturer, category, potency: [{ id, name }], pack: [name] }
@@ -177,6 +179,15 @@ export const stockInApi = {
   create: (data) => api.post('/stock-ins', data).then((r) => r.data),
   update: (id, data) => api.put(`/stock-ins/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/stock-ins/${id}`).then((r) => r.data),
+};
+
+// Pharmacy > Vendor > Payments: invoices are Stock Ins.
+export const vendorBillPaymentApi = {
+  // { vendorId?, all? ('1' keeps fully paid ones) }
+  invoices: (params) => api.get('/vendor-bill-payments/invoices', { params }).then((r) => r.data),
+  invoice: (stockInId) => api.get(`/vendor-bill-payments/invoices/${stockInId}`).then((r) => r.data),
+  create: (data) => api.post('/vendor-bill-payments', data).then((r) => r.data),
+  remove: (id) => api.delete(`/vendor-bill-payments/${id}`).then((r) => r.data),
 };
 
 export const stockReturnApi = {

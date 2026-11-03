@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 
 const MAX_SHOWN = 50;
+const barBtn = 'inline-flex items-center gap-1 rounded px-2 py-1 font-medium disabled:opacity-40';
 
 // A type-to-search box for picking one option (Item Name, Vendor Name). A
 // click or focus opens the whole list (A–Z, first 50); typing narrows it.
@@ -12,8 +14,12 @@ const MAX_SHOWN = 50;
 //  - onChange(value, option)
 //  - footer: optional { label, onClick } shown as the list's last row
 //    (e.g. "+ Add vendor"), reachable with the arrow keys too
+//  - actions: optional { onNew(typed), onEdit(option), onDelete?(option) }: a
+//    New / Edit / Delete bar under the list; Edit and Delete act on the
+//    highlighted name. Leave out onDelete to hide Delete.
+//  - keepOrder: list the options as given instead of A–Z
 //  - other props (data-r, data-c, className, placeholder, disabled) go on the input
-export default function SearchPick({ options, value, onChange, footer, className = 'input', placeholder, disabled, ...rest }) {
+export default function SearchPick({ options, value, onChange, footer, actions, keepOrder = false, className = 'input', placeholder, disabled, ...rest }) {
   const inputRef = useRef(null);
   const listRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -23,7 +29,7 @@ export default function SearchPick({ options, value, onChange, footer, className
   const [rect, setRect] = useState(null);
 
   const chosen = options.find((o) => String(o.value) === String(value));
-  const sorted = useMemo(() => [...options].sort((a, b) => a.label.localeCompare(b.label)), [options]);
+  const sorted = useMemo(() => (keepOrder ? options : [...options].sort((a, b) => a.label.localeCompare(b.label))), [options, keepOrder]);
   const q = typed ? text.trim().toLowerCase() : '';
   // Names starting with what's typed come first, then those containing it.
   const shown = useMemo(() => {
@@ -71,6 +77,8 @@ export default function SearchPick({ options, value, onChange, footer, className
     if (row.footer) footer.onClick(typed ? text.trim() : '');
     else onChange(row.value, row);
   };
+  const target = rows[active] && !rows[active].footer ? rows[active] : null;
+  const act = (fn, arg) => { close(); fn(arg); };
 
   const onKeyDown = (e) => {
     if (!open) {
@@ -110,10 +118,11 @@ export default function SearchPick({ options, value, onChange, footer, className
         <div
           ref={listRef}
           tabIndex={-1}
-          className="fixed z-50 max-h-64 overflow-y-auto rounded-lg border border-ink-200 bg-white py-1 text-sm shadow-elevated"
-          style={{ top: rect.bottom + 2, left: rect.left, minWidth: Math.max(rect.width, 220) }}
+          className="fixed z-50 flex max-h-72 flex-col rounded-lg border border-ink-200 bg-white text-sm shadow-elevated"
+          style={{ top: rect.bottom + 2, left: rect.left, minWidth: Math.max(rect.width, 260) }}
           onMouseDown={(e) => e.preventDefault()}
         >
+          <div className="min-h-0 flex-1 overflow-y-auto py-1">
           {rows.length === (footer ? 1 : 0) && <p className="px-3 py-1.5 text-ink-400">No matches</p>}
           {rows.map((row, i) => (
             <button
@@ -132,6 +141,22 @@ export default function SearchPick({ options, value, onChange, footer, className
               )}
             </button>
           ))}
+          </div>
+          {actions && (
+            <div className="flex items-center justify-between border-t border-ink-100 px-1.5 py-1 text-xs">
+              <button type="button" className={`${barBtn} text-brand-700 hover:bg-brand-50`} title="Add a new item" onClick={() => act(actions.onNew, typed ? text.trim() : '')}>
+                <Plus size={13} /> New
+              </button>
+              <button type="button" className={`${barBtn} text-ink-600 hover:bg-ink-50`} disabled={!target} title={target ? `Edit "${target.label}"` : 'Highlight a name to edit it'} onClick={() => act(actions.onEdit, target)}>
+                <Pencil size={12} /> Edit
+              </button>
+              {actions.onDelete && (
+                <button type="button" className={`${barBtn} text-ink-600 hover:bg-red-50 hover:text-red-600`} disabled={!target} title={target ? `Delete "${target.label}"` : 'Highlight a name to delete it'} onClick={() => act(actions.onDelete, target)}>
+                  <Trash2 size={12} /> Delete
+                </button>
+              )}
+            </div>
+          )}
         </div>,
         document.body,
       )}

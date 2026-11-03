@@ -119,10 +119,12 @@ async function lockReason(request, stockInId) {
       (SELECT COUNT(*) FROM StockReturnItem ri JOIN StockReturn rh ON rh.StockReturnId = ri.StockReturnId AND rh.IsActive = 1
         JOIN StockInItem l ON l.LineId = ri.StockInLineId WHERE l.StockInId = @lockId) AS Returns,
       (SELECT COUNT(*) FROM SalesBillingItem sbi JOIN SalesBilling sb ON sb.SalesBillingId = sbi.SalesBillingId AND sb.IsActive = 1
-        WHERE EXISTS (SELECT 1 FROM StockInItem l WHERE l.StockInId = @lockId AND l.ItemId = sbi.ItemId AND l.BatchNo = sbi.Batch)) AS Sales`);
-  const { Returns, Sales } = r.recordset[0];
+        WHERE EXISTS (SELECT 1 FROM StockInItem l WHERE l.StockInId = @lockId AND l.ItemId = sbi.ItemId AND l.BatchNo = sbi.Batch)) AS Sales,
+      (SELECT COUNT(*) FROM VendorPayment p WHERE p.StockInId = @lockId AND p.IsActive = 1) AS Payments`);
+  const { Returns, Sales, Payments } = r.recordset[0];
   if (Returns) return 'A Return has been made from this Stock In, so it can no longer be changed';
   if (Sales) return 'Its batches have been sold, so this Stock In can no longer be changed';
+  if (Payments) return 'The vendor has been paid against this Stock In, so it can no longer be changed';
   return null;
 }
 

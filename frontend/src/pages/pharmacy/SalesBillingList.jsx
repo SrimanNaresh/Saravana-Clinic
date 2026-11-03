@@ -63,7 +63,7 @@ export default function SalesBillingList() {
           itemName: `${l.ItemName}${l.SaleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.Batch,
           qty: Number(l.UnitQty), rate: Number(l.Rate), disc: Number(l.DiscPercent) || 0, amount: Number(l.Amount),
         })),
-        subTotal: Number(sale.SubTotal), discPercent: Number(sale.DiscPercent) || 0, discountAmount: Number(sale.DiscountAmount) || 0,
+        subTotal: Number(sale.SubTotal), discPercent: Number(sale.DiscPercent) || 0, discountAmount: Number(sale.DiscountAmount) || 0, roundOff: Number(sale.RoundOff) || 0,
         total: Number(sale.TotalAmount),
       });
     } catch {

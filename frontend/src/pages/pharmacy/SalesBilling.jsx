@@ -7,7 +7,7 @@ import SearchPick from '../../components/grid/SearchPick.jsx';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
 import { pharmacyItemApi, salesBillingApi, clinicApi } from '../../api/client.js';
-import { unitsPerPack, saleLineAmount, saleBill } from '../../utils/purchaseCalc.js';
+import { unitsPerPack, saleLineAmount, saleBill, roundOffOf } from '../../utils/purchaseCalc.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const money = (n) => (Number(n) || 0).toFixed(2);
@@ -37,6 +37,7 @@ export default function SalesBilling() {
   const [mobileNo, setMobileNo] = useState('');
   const [lines, setLines] = useState([emptyLine()]);
   const [billDisc, setBillDisc] = useState(''); // the bill's Discount %
+  const [roundOn, setRoundOn] = useState(true); // Round Off the Total to the nearest rupee
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [clinic, setClinic] = useState(null);
@@ -177,6 +178,8 @@ export default function SalesBilling() {
   // The bill too: after its discount, the Total must cover the rows' purchase cost.
   const totalCost = round2(filled.reduce((s, l) => s + costOf(l), 0));
   const belowCost = filled.length > 0 && total < totalCost;
+  const roundOff = roundOn ? roundOffOf(total) : 0;
+  const netAmount = round2(total + roundOff);
   const hasProblem = billDiscBad || belowCost
     || filled.some((l) => l.loading || problemOf(l) || !(Number(l.qty) > 0) || !(Number(l.price) > 0));
 
@@ -186,6 +189,7 @@ export default function SalesBilling() {
     setCustomerName('');
     setMobileNo('');
     setBillDisc('');
+    setRoundOn(true);
     setTransDate(today());
   };
 
@@ -209,6 +213,7 @@ export default function SalesBilling() {
       setCustomerName(sale.CustomerName || '');
       setMobileNo(sale.MobileNo || '');
       setBillDisc(Number(sale.DiscPercent) ? String(Number(sale.DiscPercent)) : '');
+      setRoundOn(Number(sale.RoundOff) !== 0);
       setLines(built.length ? built : [emptyLine()]);
     } catch {
       show('Failed to load sale for editing', 'error');
@@ -234,7 +239,7 @@ export default function SalesBilling() {
     setSaving(true);
     try {
       const payload = {
-        transDate, customerName, mobileNo, discPercent: Number(billDisc) || 0,
+        transDate, customerName, mobileNo, discPercent: Number(billDisc) || 0, roundOff: roundOn,
         items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, saleUnit: l.saleUnit, quantity: Number(l.qty), rate: Number(l.price), discPercent: Number(l.disc) || 0 })),
       };
       const billOf = (saved) => ({
@@ -243,7 +248,7 @@ export default function SalesBilling() {
           itemName: `${itemById.get(l.itemId)?.Name || ''}${l.saleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.batch,
           qty: Number(l.qty), rate: Number(l.price), disc: Number(l.disc) || 0, amount: amountOf(l),
         })),
-        subTotal, discPercent: Number(billDisc) || 0, discountAmount,
+        subTotal, discPercent: Number(billDisc) || 0, discountAmount, roundOff,
         total: Number(saved.TotalAmount),
       });
       const toList = () => navigate('/pharmacy/sales-billing-list', { state: { flash: 'Sale updated' } });
@@ -453,6 +458,20 @@ export default function SalesBilling() {
                     Total
                   </td>
                   <td className={`px-2 py-1 ${num} text-[14px] font-bold ${belowCost ? 'text-red-600' : 'text-brand-800'}`}>{money(total)}</td>
+                  <td />
+                </tr>
+                <tr className="text-ink-700">
+                  <td className="px-2 py-0.5 text-right text-[12px] text-ink-500" colSpan={12}>
+                    <label className="inline-flex cursor-pointer items-center gap-1.5" title="Round the Total to the nearest rupee">
+                      <input type="checkbox" checked={roundOn} onChange={(e) => setRoundOn(e.target.checked)} /> Round Off
+                    </label>
+                  </td>
+                  <td className={`px-2 py-0.5 ${num} ${roundOff < 0 ? 'text-red-600' : roundOff > 0 ? 'text-ink-700' : 'text-ink-400'}`}>{roundOff > 0 ? '+ ' : roundOff < 0 ? '− ' : ''}{money(Math.abs(roundOff))}</td>
+                  <td />
+                </tr>
+                <tr className="border-t border-brand-100 bg-brand-50/70 font-semibold text-ink-800">
+                  <td className="px-2 py-1 text-right text-[12px] uppercase tracking-wide text-ink-500" colSpan={12}>Net Amount</td>
+                  <td className={`px-2 py-1 ${num} text-[15px] font-bold text-brand-800`}>{money(netAmount)}</td>
                   <td />
                 </tr>
               </tfoot>

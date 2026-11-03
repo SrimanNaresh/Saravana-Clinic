@@ -799,6 +799,36 @@ CREATE TABLE StockReturnItem (
     CONSTRAINT FK_StockReturnItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
 );
 
+-- Purchase / Order Round Off: added to the Sum of Total to reach the nearest
+-- rupee (0 when not rounded). TotalAmount is the Net Amount, after it.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='RoundOff' AND Object_ID=Object_ID('PurchaseOrder'))
+    ALTER TABLE PurchaseOrder ADD RoundOff DECIMAL(10,2) NOT NULL DEFAULT 0;
+
+-- Sales Round Off: added to the Total (after the Bill Discount) to reach the
+-- nearest rupee (0 when not rounded). TotalAmount is the Net Amount, after it.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='RoundOff' AND Object_ID=Object_ID('SalesBilling'))
+    ALTER TABLE SalesBilling ADD RoundOff DECIMAL(10,2) NOT NULL DEFAULT 0;
+
+-- Pharmacy > Vendor > Payments: money paid to a vendor against one Stock In
+-- (the invoice). Its balance = Stock In total (paid units + GST) less its
+-- Returns less these payments. Number: SC-VP0001 from the id.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='VendorPayment' AND xtype='U')
+CREATE TABLE VendorPayment (
+    PaymentId      INT IDENTITY(1,1) PRIMARY KEY,
+    VendorId       INT NOT NULL,
+    StockInId      INT NOT NULL,
+    PayDate        DATE NOT NULL,
+    Amount         DECIMAL(12,2) NOT NULL,
+    PayMode        NVARCHAR(20) NOT NULL,
+    ReferenceNo    NVARCHAR(50) NULL,
+    Notes          NVARCHAR(300) NULL,
+    CreatedBy      NVARCHAR(100) NULL,
+    IsActive       BIT NOT NULL DEFAULT 1,
+    CreatedAt      DATETIME NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_VendorPayment_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId),
+    CONSTRAINT FK_VendorPayment_StockIn FOREIGN KEY (StockInId) REFERENCES StockIn(StockInId)
+);
+
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='SalesReturn' AND xtype='U')
 CREATE TABLE SalesReturn (
     SalesReturnId INT IDENTITY(1,1) PRIMARY KEY,

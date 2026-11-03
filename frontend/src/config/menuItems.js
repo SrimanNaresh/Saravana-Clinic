@@ -46,6 +46,7 @@ export const MENU_GROUPS = [
         submenu: [
           { key: 'pharmacy.vendor-master', label: 'Master', to: '/pharmacy/vendor-master' },
           { key: 'pharmacy.vendor-list', label: 'List', to: '/pharmacy/vendor-list' },
+          { key: 'pharmacy.vendor-payment', label: 'Payments', to: '/pharmacy/vendor-payment' },
         ],
       },
       {

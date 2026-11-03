@@ -22,6 +22,10 @@ export function purchaseLine({ pRate, discPercent, quantity, cgstPercent, sgstPe
 
 export const purchaseTotal = (lines) => round2(lines.reduce((s, l) => s + purchaseLine(l).total, 0));
 
+// Round Off: what takes a total to the nearest rupee.
+//   e.g. 24.25 -> -0.25 (Net 24.00); 24.50 -> +0.50 (Net 25.00); 24.00 -> 0
+export const roundOffOf = (total) => round2(Math.round(round2(total)) - round2(total));
+
 // Stock In selling price: the MRP less Discount % of it.
 //   e.g. MRP 32.12, Discount 10 % -> 28.91; no discount -> 32.12
 export function selAmount({ mrp, discPercent }) {

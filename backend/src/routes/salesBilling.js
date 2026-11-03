@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { batchStock } from '../utils/batchStock.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
-import { unitsPerPack, saleLineAmount, saleBill } from '../utils/purchaseCalc.js';
+import { unitsPerPack, saleLineAmount, saleBill, roundOffOf } from '../utils/purchaseCalc.js';
 
 // Pharmacy > Sales: counter sales, each line sold from one batch, by the Pack
 // or by the Unit (one piece; price and quantity per piece). Stock is never
@@ -87,7 +87,7 @@ router.get('/:id', async (req, res) => {
     const pool = await getPool();
     const head = await pool.request().input('id', sql.Int, req.params.id).query(`
       SELECT h.SalesBillingId, ${CODE} AS Code, h.TransDate, h.CustomerName, h.MobileNo, h.TotalAmount,
-             ISNULL(h.SubTotal, h.TotalAmount) AS SubTotal, ISNULL(h.DiscPercent, 0) AS DiscPercent, ISNULL(h.DiscountAmount, 0) AS DiscountAmount
+             ISNULL(h.SubTotal, h.TotalAmount) AS SubTotal, ISNULL(h.DiscPercent, 0) AS DiscPercent, ISNULL(h.DiscountAmount, 0) AS DiscountAmount, h.RoundOff
       FROM SalesBilling h WHERE h.SalesBillingId = @id AND h.IsActive = 1
     `);
     if (!head.recordset.length) return res.status(404).json({ error: 'Sale not found' });
@@ -169,7 +169,10 @@ async function checkSale(tx, body, saleId) {
   const bill = saleBill(lines.map((l) => l.amount), discPercent);
   const totalCost = round2(lines.reduce((s, l) => s + l.cost, 0));
   if (bill.total < totalCost) return { error: `Total ${bill.total.toFixed(2)} is below the purchase cost ${totalCost.toFixed(2)}: lower the Bill Discount` };
-  return { transDate, customerName, mobileNo: mobileNo || null, lines, discPercent, ...bill };
+  // body.roundOff: true rounds the Total to the nearest rupee. The cost check
+  // above is on the Total before it, so rounding down by up to 0.50 is allowed.
+  const roundOff = body.roundOff ? roundOffOf(bill.total) : 0;
+  return { transDate, customerName, mobileNo: mobileNo || null, lines, discPercent, ...bill, roundOff, total: round2(bill.total + roundOff) };
 }
 
 async function insertLines(tx, saleId, lines) {
@@ -210,12 +213,13 @@ async function saveSale(req, res, saleId) {
       .input('subTotal', sql.Decimal(12, 2), sale.subTotal)
       .input('disc', sql.Decimal(5, 2), sale.discPercent)
       .input('discAmt', sql.Decimal(12, 2), sale.discountAmount)
-      .input('total', sql.Decimal(12, 2), sale.total);
+      .input('total', sql.Decimal(12, 2), sale.total)
+      .input('roundOff', sql.Decimal(10, 2), sale.roundOff);
     let id = saleId;
     if (saleId) {
       const upd = await head.input('id', sql.Int, saleId).query(`
         UPDATE SalesBilling SET TransDate = @transDate, CustomerName = @customer, MobileNo = @mobile, TotalAmount = @total,
-            SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt
+            SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt, RoundOff = @roundOff
         WHERE SalesBillingId = @id AND IsActive = 1`);
       if (!upd.rowsAffected[0]) {
         await tx.rollback();
@@ -224,9 +228,9 @@ async function saveSale(req, res, saleId) {
       await new sql.Request(tx).input('id', sql.Int, saleId).query('DELETE FROM SalesBillingItem WHERE SalesBillingId = @id');
     } else {
       const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null).query(`
-        INSERT INTO SalesBilling (TransDate, CustomerName, MobileNo, TotalAmount, SubTotal, DiscPercent, DiscountAmount, CreatedBy)
+        INSERT INTO SalesBilling (TransDate, CustomerName, MobileNo, TotalAmount, SubTotal, DiscPercent, DiscountAmount, RoundOff, CreatedBy)
         OUTPUT INSERTED.SalesBillingId
-        VALUES (@transDate, @customer, @mobile, @total, @subTotal, @disc, @discAmt, @by)`);
+        VALUES (@transDate, @customer, @mobile, @total, @subTotal, @disc, @discAmt, @roundOff, @by)`);
       id = ins.recordset[0].SalesBillingId;
     }
     await insertLines(tx, id, sale.lines);

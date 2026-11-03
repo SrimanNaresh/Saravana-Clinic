@@ -5,8 +5,10 @@ import { CardHeader, Toast } from '../../components/ui.jsx';
 import SearchPick from '../../components/grid/SearchPick.jsx';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
+import { useAuth } from '../../context/AuthContext.jsx';
+import ItemFormModal from './ItemFormModal.jsx';
 import { itemMasterApi, purchaseOrderApi, vendorApi } from '../../api/client.js';
-import { purchaseLine, purchaseTotal } from '../../utils/purchaseCalc.js';
+import { purchaseLine, purchaseTotal, roundOffOf } from '../../utils/purchaseCalc.js';
 
 const MAX_GST = 28;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -77,6 +79,8 @@ export default function PurchaseOrder() {
   const [showDetails, setShowDetails] = useState(false);
   const [orderDate, setOrderDate] = useState(today());
   const [lines, setLines] = useState([emptyLine()]);
+  // Round Off: rounds the Sum of Total to the nearest rupee (on for a new order).
+  const [roundOn, setRoundOn] = useState(true);
   const [showOptional, setShowOptional] = useState(false);
   const [editing, setEditing] = useState(null); // { id, no, locked }
   const [saving, setSaving] = useState(false);
@@ -86,6 +90,10 @@ export default function PurchaseOrder() {
   const [bulk, setBulk] = useState(null);
   // Old Price: { itemId: last net rate (P.Rate less Disc %) from the chosen vendor }.
   const [lastRates, setLastRates] = useState({});
+  // Add / Edit item popup from the Item Name list: null or { name } / { id }, plus the row it came from.
+  const [itemForm, setItemForm] = useState(null);
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
 
   useEffect(() => {
     itemMasterApi.list({ status: 'Active' }).then(setItems).catch(() => show('Failed to load items', 'error'));
@@ -115,6 +123,7 @@ export default function PurchaseOrder() {
       setVendorId(String(o.VendorId));
       setDetails(o.VendorDetails || '');
       setOrderDate(String(o.OrderDate).slice(0, 10));
+      setRoundOn(Number(o.RoundOff) !== 0);
       setLines(o.lines.map((l) => ({
         ...emptyLine(), lineId: l.LineId, itemId: String(l.ItemId), generic: l.GenericName || '', manufacturer: l.Manufacturer || '',
         hsn: l.HSNCode || '', category: l.Category || '', pack: l.Pack || '', unit: l.Unit || '', mrp: numStr(l.MRP), pRate: numStr(l.PRate),
@@ -155,6 +164,47 @@ export default function PurchaseOrder() {
     if (it) setLines((ls) => ls.map((l) => (l.key === key ? { ...lineFromItem(it), key, lineId: null } : l)));
   };
 
+  // New / Edit / Delete from a row's Item Name list.
+  const focusItemBox = (rowKey, c = 0) => setTimeout(() => {
+    const r = lines.findIndex((l) => l.key === rowKey);
+    document.querySelector(`[data-r="${r}"][data-c="${c}"]`)?.focus();
+  }, 50);
+  const itemSaved = (it, isNew) => {
+    const id = String(it.ItemId);
+    setItems((all) => (isNew ? [...all, it] : all.map((i) => (String(i.ItemId) === id ? it : i))));
+    if (isNew) {
+      setLines((ls) => ls.map((l) => (l.key === itemForm.rowKey ? { ...lineFromItem(it), key: l.key, lineId: null } : l)));
+      show(`Added item ${it.Name} (${it.ItemCode})`, 'success');
+      focusItemBox(itemForm.rowKey, 1);
+    } else {
+      // Rows already holding the item take its new details; their prices and quantities stay.
+      setLines((ls) => ls.map((l) => (l.itemId !== id ? l : {
+        ...l, generic: it.GenericName || '', manufacturer: it.ManufacturerName || '', hsn: it.HSNCode || '',
+        category: it.Category || '', pack: it.Pack || '', unit: it.UnitName || '',
+      })));
+      show(`${it.Name} updated`, 'success');
+      focusItemBox(itemForm.rowKey);
+    }
+    setItemForm(null);
+  };
+  const deleteItem = async (opt, rowKey) => {
+    if (!confirm(`Delete item "${opt.label}"? This can't be undone.`)) return focusItemBox(rowKey);
+    try {
+      await itemMasterApi.remove(opt.value);
+      setItems((all) => all.filter((i) => String(i.ItemId) !== String(opt.value)));
+      setLines((ls) => ls.map((l) => (l.itemId === String(opt.value) ? { ...emptyLine(), key: l.key } : l)));
+      show(`Deleted ${opt.label}`, 'success');
+    } catch (err) {
+      show(err.response?.data?.error || 'Could not delete the item', 'error');
+    }
+    focusItemBox(rowKey);
+  };
+  const itemActions = (rowKey) => ({
+    onNew: (typed) => setItemForm({ name: typed, rowKey }),
+    onEdit: (opt) => setItemForm({ id: opt.value, rowKey }),
+    onDelete: isAdmin ? (opt) => deleteItem(opt, rowKey) : undefined,
+  });
+
   // Bulk add panel.
   const inTable = useMemo(() => new Set(lines.map((l) => l.itemId).filter(Boolean)), [lines]);
   const bulkCategories = useMemo(() => [...new Set(items.map((i) => i.Category).filter(Boolean))].sort(), [items]);
@@ -188,9 +238,11 @@ export default function PurchaseOrder() {
   const filled = lines.filter((l) => l.itemId);
   const problems = new Map(filled.map((l) => [l.key, lineProblem(l)]).filter(([, p]) => p));
   const total = purchaseTotal(filled.map((l) => ({ pRate: l.pRate, discPercent: l.disc, quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst })));
+  const roundOff = roundOn ? roundOffOf(total) : 0;
+  const netAmount = total + roundOff;
 
   const reset = () => {
-    setEditing(null); setVendorId(''); setDetails(''); setShowDetails(false); setOrderDate(today()); setLines([emptyLine()]);
+    setEditing(null); setVendorId(''); setDetails(''); setShowDetails(false); setOrderDate(today()); setLines([emptyLine()]); setRoundOn(true);
   };
 
   const save = async (e) => {
@@ -202,7 +254,7 @@ export default function PurchaseOrder() {
     setSaving(true);
     try {
       const body = {
-        vendorId: Number(vendorId), orderDate, vendorDetails: details,
+        vendorId: Number(vendorId), orderDate, vendorDetails: details, roundOff: roundOn,
         lines: filled.map((l) => ({
           lineId: l.lineId, itemId: Number(l.itemId), mrp: l.mrp, pRate: l.pRate, freeQty: l.free, discPercent: l.disc,
           quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst,
@@ -388,7 +440,7 @@ export default function PurchaseOrder() {
                     <tr key={l.key} className={bad ? 'bg-red-50' : ''} title={bad || ''}>
                       <td className={`${cell} text-center text-ink-400`}>{r + 1}</td>
                       <td className={cell}>
-                        <SearchPick className={box} data-r={r} data-c={0} placeholder="Search item..." options={itemOptions} value={l.itemId} onChange={(v) => pickItem(l.key, v)} />
+                        <SearchPick className={box} data-r={r} data-c={0} placeholder="Search item..." options={itemOptions} value={l.itemId} onChange={(v) => pickItem(l.key, v)} actions={itemActions(l.key)} />
                         {bad && <p className="px-1.5 text-[11px] text-red-600">{bad}</p>}
                       </td>
                       {showOptional && [l.generic, l.manufacturer, l.hsn].map((v, i) => <td key={i} className={`${cell} ${opt} px-1.5`}>{v}</td>)}
@@ -427,6 +479,22 @@ export default function PurchaseOrder() {
                   <td className={`${cell} px-1.5 text-right text-ink-900`}>{money(total)}</td>
                   <td className={cell} />
                 </tr>
+                <tr className="bg-ink-50">
+                  <td className={`${cell} px-2 text-right`} colSpan={16 + optCols}>
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 font-medium text-ink-600" title="Round the Sum of Total to the nearest rupee">
+                      <input type="checkbox" checked={roundOn} onChange={(e) => setRoundOn(e.target.checked)} /> Round Off
+                    </label>
+                  </td>
+                  <td className={`${cell} px-1.5 text-right tabular-nums ${roundOff < 0 ? 'text-red-600' : 'text-ink-700'}`}>
+                    {roundOff > 0 ? '+' : ''}{money(roundOff)}
+                  </td>
+                  <td className={cell} />
+                </tr>
+                <tr className="bg-brand-50 font-bold">
+                  <td className={`${cell} px-2 text-right text-brand-800`} colSpan={16 + optCols}>Net Amount</td>
+                  <td className={`${cell} px-1.5 text-right text-[13px] text-brand-800`}>{money(netAmount)}</td>
+                  <td className={cell} />
+                </tr>
               </tfoot>
             </table>
           </div>
@@ -441,6 +509,7 @@ export default function PurchaseOrder() {
           </div>
         </form>
       </div>
+      <ItemFormModal target={itemForm} onClose={() => { focusItemBox(itemForm.rowKey); setItemForm(null); }} onSaved={itemSaved} />
       <Toast toast={toast} />
     </div>
   );
