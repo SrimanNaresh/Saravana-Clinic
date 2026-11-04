@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Undo2, Search, Plus, Pencil } from 'lucide-react';
+import { Undo2, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
 import { stockReturnApi } from '../../api/client.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 
 const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-GB');
 
 // Pharmacy > Return > List: every return to a vendor, searchable by return
-// no, Stock In no, vendor or item name.
+// no, Stock In no, vendor or item name. Only an Admin sees Delete (the server
+// checks too); deleting puts the returned quantity back into stock.
 export default function StockReturnList() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast, show } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -33,6 +37,17 @@ export default function StockReturnList() {
     const t = setTimeout(() => load(search), search ? 350 : 0);
     return () => clearTimeout(t);
   }, [search, load]);
+
+  const remove = async (r) => {
+    if (!confirm(`Delete return ${r.ReturnNo} (${r.VendorName}, ₹${money(r.TotalAmount)})?\n\nThe returned quantity goes back into stock.`)) return;
+    try {
+      await stockReturnApi.remove(r.StockReturnId);
+      show(`Return ${r.ReturnNo} deleted`, 'success');
+      load(search);
+    } catch (err) {
+      show(err.response?.data?.error || 'Delete failed', 'error');
+    }
+  };
 
   const grand = rows.reduce((t, r) => t + Number(r.TotalAmount || 0), 0);
 
@@ -66,7 +81,7 @@ export default function StockReturnList() {
                   <th className="px-3 py-2 text-right">Items</th>
                   <th className="px-3 py-2 text-right">Total Qty</th>
                   <th className="px-3 py-2 text-right">Amount</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">Edit</th>
+                  <th className="rounded-r-lg px-3 py-2 text-right">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -80,8 +95,13 @@ export default function StockReturnList() {
                     <td className="px-3 py-1.5 text-right">{r.Items}</td>
                     <td className="px-3 py-1.5 text-right">{Number(r.TotalQty)}</td>
                     <td className="px-3 py-1.5 text-right font-semibold text-slate-800">{money(r.TotalAmount)}</td>
-                    <td className="px-3 py-1.5 text-right">
-                      <button type="button" className="btn-ghost px-2 py-1" title="Edit return" onClick={() => navigate('/pharmacy/return', { state: { editReturnId: r.StockReturnId } })}><Pencil size={15} /></button>
+                    <td className="px-3 py-1.5">
+                      <div className="flex justify-end gap-1">
+                        <button type="button" className="btn-ghost px-2 py-1" title="Edit return" onClick={() => navigate('/pharmacy/return', { state: { editReturnId: r.StockReturnId } })}><Pencil size={15} /></button>
+                        {isAdmin && (
+                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete return (Admin only)" onClick={() => remove(r)}><Trash2 size={15} /></button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
