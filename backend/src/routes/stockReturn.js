@@ -172,6 +172,7 @@ router.put('/:id', (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
+    if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete a return' });
     const pool = await getPool();
     await pool.request().input('id', sql.Int, req.params.id).query('UPDATE StockReturn SET IsActive = 0 WHERE StockReturnId = @id');
     res.json({ success: true });

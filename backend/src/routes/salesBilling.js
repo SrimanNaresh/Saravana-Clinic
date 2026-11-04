@@ -252,6 +252,7 @@ router.put('/:id', (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
+    if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete a sale' });
     const pool = await getPool();
     await pool.request().input('id', sql.Int, req.params.id)
       .query('UPDATE SalesBilling SET IsActive = 0 WHERE SalesBillingId = @id');
