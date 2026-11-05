@@ -7,16 +7,15 @@ import { itemMasterApi } from '../../api/client.js';
 import { MAX_GST, emptyForm, rowToForm, validate, ItemFields } from './ItemForm.jsx';
 import { usePickLists } from './usePickLists.js';
 
-// Pharmacy > Item > Master: add or edit an item. On Add the Quantity is the
-// opening stock; on Edit it shows the current stock, and changing it records
-// an adjustment for the difference.
+// Pharmacy > Item > Master: add or edit an item. Stock comes from Stock In and
+// Stock Adjustment; on Edit the current stock is shown read-only.
 export default function ItemMaster() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast, show } = useToast();
   const { handlersFor } = usePickLists((m) => show(m, 'error'));
   const [form, setForm] = useState(emptyForm);
-  const [editing, setEditing] = useState(null); // { id, code, qty } while editing; qty = stock when loaded
+  const [editing, setEditing] = useState(null); // { id, code, stock } while editing
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -24,7 +23,7 @@ export default function ItemMaster() {
     if (!id) return;
     navigate(location.pathname, { replace: true, state: null });
     itemMasterApi.get(id)
-      .then((r) => { const f = rowToForm(r); setForm(f); setEditing({ id: r.ItemId, code: r.ItemCode, qty: f.quantity }); })
+      .then((r) => { setForm(rowToForm(r)); setEditing({ id: r.ItemId, code: r.ItemCode, stock: Number(r.Stock || 0) }); })
       .catch(() => show('Failed to load the item', 'error'));
   }, [location.state, location.pathname, navigate, show]);
 
@@ -37,8 +36,7 @@ export default function ItemMaster() {
     setSaving(true);
     try {
       if (editing) {
-        // Quantity goes only when it was changed, so a sale made meanwhile isn't undone.
-        await itemMasterApi.update(editing.id, { ...form, quantity: form.quantity === editing.qty ? '' : form.quantity });
+        await itemMasterApi.update(editing.id, form);
         toList(`${form.name} updated`);
       } else {
         const r = await itemMasterApi.create(form);

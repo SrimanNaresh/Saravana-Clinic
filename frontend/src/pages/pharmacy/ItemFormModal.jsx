@@ -10,7 +10,7 @@ import { usePickLists } from './usePickLists.js';
 //  - onSaved(itemRow, isNew): the saved item as the Item List returns it
 export default function ItemFormModal({ target, onClose, onSaved }) {
   const [form, setForm] = useState(emptyForm);
-  const [editing, setEditing] = useState(null); // { id, code, qty }
+  const [editing, setEditing] = useState(null); // { id, code, stock }
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -23,7 +23,7 @@ export default function ItemFormModal({ target, onClose, onSaved }) {
     if (!target.id) { setForm({ ...emptyForm, name: target.name || '' }); return; }
     setLoading(true);
     itemMasterApi.get(target.id)
-      .then((r) => { const f = rowToForm(r); setForm(f); setEditing({ id: r.ItemId, code: r.ItemCode, qty: f.quantity }); })
+      .then((r) => { setForm(rowToForm(r)); setEditing({ id: r.ItemId, code: r.ItemCode, stock: Number(r.Stock || 0) }); })
       .catch(() => setError('Failed to load the item'))
       .finally(() => setLoading(false));
   }, [target]);
@@ -38,8 +38,7 @@ export default function ItemFormModal({ target, onClose, onSaved }) {
     try {
       let id;
       if (editing) {
-        // Quantity goes only when it was changed, so a sale made meanwhile isn't undone.
-        await itemMasterApi.update(editing.id, { ...form, quantity: form.quantity === editing.qty ? '' : form.quantity });
+        await itemMasterApi.update(editing.id, form);
         id = editing.id;
       } else {
         id = (await itemMasterApi.create(form)).ItemId;

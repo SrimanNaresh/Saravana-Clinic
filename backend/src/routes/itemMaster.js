@@ -2,9 +2,9 @@ import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { CURRENT_STOCK } from '../utils/stockEvents.js';
 
-// Pharmacy > Item: Item Master (add / edit, with opening stock and quantity
-// adjustments), Item List and Bulk Update, plus the pick-lists the Item form
-// uses. The older /pharmacy-items route stays for imports and other screens.
+// Pharmacy > Item: Item Master (add / edit; stock itself changes only through
+// Stock In, Sales, Returns and Stock Adjustment), Item List and Bulk Update,
+// plus the pick-lists the Item form uses. The older /pharmacy-items route stays for imports and other screens.
 const router = Router();
 
 // Pick-lists: field -> table, id column, and the item column it fills. Type /
@@ -43,10 +43,6 @@ const ITEM_SELECT = `
   LEFT JOIN ManufacturerMaster m ON m.ManufacturerId = i.ManufacturerId
   LEFT JOIN (${CURRENT_STOCK}) st ON st.ItemId = i.ItemId
 `;
-
-const lockStock = (tx) => new sql.Request(tx).query(
-  "EXEC sp_getapplock @Resource = 'pharmacy-stock', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000",
-);
 
 // ---------- Pick-lists ----------
 
@@ -194,7 +190,7 @@ function checkPricing(v) {
 
 // Cleans and checks an Item form body against the pick-lists. Returns
 // { error } or the values to save (ids resolved, numbers parsed).
-async function checkItem(pool, body, isCreate) {
+async function checkItem(pool, body) {
   const v = {};
   v.name = text(body.name);
   if (!v.name) return { error: 'Item Name is required' };
@@ -220,12 +216,6 @@ async function checkItem(pool, body, isCreate) {
   if (!['None', 'H', 'H1'].includes(v.schedule)) return { error: 'Schedule must be None, H or H1' };
   v.status = text(body.status) || 'Active';
   if (!['Active', 'Inactive'].includes(v.status)) return { error: 'Status must be Active or Inactive' };
-
-  // Quantity: the opening stock on Add; on Edit, the stock it should now be.
-  const q = text(body.quantity);
-  v.quantity = q === '' ? null : Number(q);
-  if (v.quantity !== null && !(v.quantity >= 0)) return { error: 'Quantity must be 0 or more' };
-  if (isCreate && v.quantity === null) v.quantity = 0;
   return v;
 }
 
@@ -250,54 +240,36 @@ function bindItem(request, v) {
     .input('status', sql.NVarChar(10), v.status);
 }
 
-async function addMovement(tx, itemId, qty, reason, note, by) {
-  await new sql.Request(tx)
-    .input('itemId', sql.Int, itemId)
-    .input('qty', sql.Decimal(10, 2), qty)
-    .input('reason', sql.NVarChar(20), reason)
-    .input('note', sql.NVarChar(300), note)
-    .input('by', sql.NVarChar(100), by)
-    .query(`INSERT INTO StockMovement (ItemId, QtyChange, Reason, RefType, RefId, Note, CreatedBy)
-            VALUES (@itemId, @qty, @reason, 'item', @itemId, @note, @by)`);
-}
-
-// Add: the Quantity becomes the opening stock; selling price starts at MRP.
+// Add: starts with no stock (Stock In or Stock Adjustment adds it); selling
+// price starts at MRP.
 router.post('/', async (req, res) => {
   const pool = await getPool();
-  const v = await checkItem(pool, req.body || {}, true);
+  const v = await checkItem(pool, req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  const tx = new sql.Transaction(pool);
   try {
-    await tx.begin();
-    const ins = await bindItem(new sql.Request(tx), v).query(`
+    const ins = await bindItem(pool.request(), v).query(`
       INSERT INTO PharmacyItem (Name, UnitId, GenericNameId, ManufacturerId, Category, Potency, HSNCode, Pack, Rack, BoxNo,
                                 MRP, SellPrice, CGSTPercent, SGSTPercent, GSTPercent, ScheduleH, ScheduleH1, Status)
       OUTPUT INSERTED.ItemId
       VALUES (@name, @unitId, @genericId, @manufacturerId, @category, @potency, @hsn, @pack, @rack, @box,
               @mrp, @mrp, @cgst, @sgst, @gst, @h, @h1, @status)`);
     const itemId = ins.recordset[0].ItemId;
-    if (v.quantity > 0) await addMovement(tx, itemId, v.quantity, 'opening', 'Opening stock', req.user?.username || null);
-    await tx.commit();
     res.status(201).json({ ItemId: itemId, ItemCode: `ITM${String(itemId).padStart(6, '0')}` });
   } catch (err) {
-    await tx.rollback().catch(() => {});
     res.status(500).json({ error: err.message });
   }
 });
 
-// Edit: a changed Quantity is saved as an adjustment of the difference. A
-// lower MRP also brings the selling price down to it.
+// Edit: item details only — stock isn't changed here. A lower MRP also brings
+// the selling price down to it.
 router.put('/:id', async (req, res) => {
   const itemId = Number(req.params.id);
   if (!Number.isInteger(itemId) || itemId <= 0) return res.status(400).json({ error: 'Bad item id' });
   const pool = await getPool();
-  const v = await checkItem(pool, req.body || {}, false);
+  const v = await checkItem(pool, req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  const tx = new sql.Transaction(pool);
   try {
-    await tx.begin();
-    await lockStock(tx);
-    const upd = await bindItem(new sql.Request(tx), v).input('id', sql.Int, itemId).query(`
+    const upd = await bindItem(pool.request(), v).input('id', sql.Int, itemId).query(`
       UPDATE PharmacyItem
       SET Name = @name, UnitId = @unitId, GenericNameId = @genericId, ManufacturerId = @manufacturerId,
           Category = @category, Potency = @potency, HSNCode = @hsn, Pack = @pack, Rack = @rack, BoxNo = @box,
@@ -305,19 +277,9 @@ router.put('/:id', async (req, res) => {
           SellPrice = CASE WHEN @mrp IS NOT NULL AND (SellPrice IS NULL OR SellPrice > @mrp) THEN @mrp ELSE SellPrice END,
           ScheduleH = @h, ScheduleH1 = @h1, Status = @status, EditedAt = GETDATE()
       WHERE ItemId = @id AND IsActive = 1`);
-    if (!upd.rowsAffected[0]) {
-      await tx.rollback();
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    if (v.quantity !== null) {
-      const cur = await new sql.Request(tx).input('itemId', sql.Int, itemId).query(CURRENT_STOCK);
-      const diff = Math.round((v.quantity - Number(cur.recordset[0]?.CurrentStock || 0)) * 100) / 100;
-      if (diff !== 0) await addMovement(tx, itemId, diff, 'adjustment', 'Quantity changed on Edit Item', req.user?.username || null);
-    }
-    await tx.commit();
+    if (!upd.rowsAffected[0]) return res.status(404).json({ error: 'Item not found' });
     res.json({ ItemId: itemId });
   } catch (err) {
-    await tx.rollback().catch(() => {});
     res.status(500).json({ error: err.message });
   }
 });
