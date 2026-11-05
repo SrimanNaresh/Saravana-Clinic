@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
       .query(`
         SELECT PharmacyId, Name, Address, ContactNo, CreatedAt
         FROM Pharmacy
-        WHERE (@search = '%%' OR Name LIKE @search OR Address LIKE @search OR ContactNo LIKE @search)
+        WHERE IsActive = 1 AND (@search = '%%' OR Name LIKE @search OR Address LIKE @search OR ContactNo LIKE @search)
         ORDER BY PharmacyId DESC
       `);
     res.json(result.recordset);
@@ -58,7 +58,7 @@ router.put('/:id', async (req, res) => {
         UPDATE Pharmacy
         SET Name = @name, Address = @address, ContactNo = @contactNo
         OUTPUT INSERTED.*
-        WHERE PharmacyId = @id
+        WHERE PharmacyId = @id AND IsActive = 1
       `);
     if (!result.recordset.length) return res.status(404).json({ error: 'Not found' });
     res.json(result.recordset[0]);
@@ -73,7 +73,7 @@ router.delete('/:id', async (req, res) => {
     await pool
       .request()
       .input('id', sql.Int, req.params.id)
-      .query('DELETE FROM Pharmacy WHERE PharmacyId = @id');
+      .query('UPDATE Pharmacy SET IsActive = 0 WHERE PharmacyId = @id');
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

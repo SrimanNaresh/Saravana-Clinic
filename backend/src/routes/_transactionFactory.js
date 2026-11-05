@@ -210,6 +210,7 @@ export function createTransactionRouter({ headerTable, itemTable, headerIdCol, c
 
   router.delete('/:id', async (req, res) => {
     try {
+      if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete this' });
       const pool = await getPool();
       await pool
         .request()

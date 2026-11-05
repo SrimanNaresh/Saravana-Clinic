@@ -13,6 +13,7 @@ const KINDS = {
   purchase: ['Stock In', 'bg-emerald-100 text-emerald-700'],
   return: ['Return', 'bg-red-100 text-red-700'],
   issue: ['Sold', 'bg-red-100 text-red-700'],
+  'sales-return': ['Sales Return', 'bg-emerald-100 text-emerald-700'],
   adjustment: ['Adjustment', 'bg-amber-100 text-amber-700'],
 };
 

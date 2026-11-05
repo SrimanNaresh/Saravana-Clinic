@@ -328,7 +328,7 @@ router.put('/:id', async (req, res) => {
 const ITEM_USED_IN = [
   ['PurchaseOrderItem', 'purchase order'], ['StockInItem', 'Stock In'], ['StockReturnItem', 'stock return'],
   ['SalesBillingItem', 'sales bill'], ['SalesReturnItem', 'sales return'], ['PurchaseInvoiceItem', 'purchase invoice'],
-  ['PurchaseReturnItem', 'purchase return'], ['StockInward', 'stock inward'],
+  ['PurchaseReturnItem', 'purchase return'], ['StockInward', 'stock inward'], ['StockAdjustmentItem', 'stock adjustment'],
 ];
 router.delete('/:id', async (req, res) => {
   if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete an item' });

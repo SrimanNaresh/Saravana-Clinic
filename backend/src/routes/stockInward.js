@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { num, text, blank, importRowBody, addedNote } from './_purchaseRows.js';
+import { batchStock } from '../utils/batchStock.js';
 
 const router = Router();
 
@@ -207,15 +208,32 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// Soft delete (Admin only): its stock comes off, so it's refused when the
+// batch has since been sold and would go below zero.
 router.delete('/:id', async (req, res) => {
+  if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete a Stock Inward' });
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
   try {
-    const pool = await getPool();
-    await pool
-      .request()
-      .input('id', sql.Int, req.params.id)
-      .query('UPDATE StockInward SET IsActive = 0 WHERE StockInwardId = @id');
+    await tx.begin();
+    await new sql.Request(tx).query(
+      "EXEC sp_getapplock @Resource = 'pharmacy-stock', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000",
+    );
+    const row = (await new sql.Request(tx).input('id', sql.Int, req.params.id).query(`
+      UPDATE StockInward SET IsActive = 0 OUTPUT INSERTED.ItemId, ISNULL(INSERTED.Batch, '') AS Batch
+      WHERE StockInwardId = @id AND IsActive = 1`)).recordset[0];
+    if (row) {
+      const short = (await batchStock(new sql.Request(tx), [row.ItemId]))
+        .find((b) => b.Batch === row.Batch && b.AvailableQty < -0.00005);
+      if (short) {
+        await tx.rollback();
+        return res.status(400).json({ error: `Batch ${row.Batch || '(none)'} has already been sold, so this Stock Inward can't be deleted` });
+      }
+    }
+    await tx.commit();
     res.json({ success: true });
   } catch (err) {
+    await tx.rollback().catch(() => {});
     res.status(500).json({ error: err.message });
   }
 });

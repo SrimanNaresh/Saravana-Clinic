@@ -194,6 +194,14 @@ async function insertLines(tx, saleId, lines) {
   }
 }
 
+// A sale with a Sales Return against it can't be changed or deleted: the
+// return points at its lines.
+async function returnedReason(request, saleId) {
+  const r = await request.input('rsId', sql.Int, saleId).query(`
+    SELECT TOP 1 ${docNoSql('SR', 'SalesReturnId')} AS ReturnNo FROM SalesReturn WHERE SalesBillingId = @rsId AND IsActive = 1`);
+  return r.recordset.length ? `Sales Return ${r.recordset[0].ReturnNo} has been made from this sale, so it can no longer be changed` : null;
+}
+
 // Saves a new sale (saleId null) or replaces an existing one's header and lines.
 async function saveSale(req, res, saleId) {
   const pool = await getPool();
@@ -201,6 +209,11 @@ async function saveSale(req, res, saleId) {
   try {
     await tx.begin();
     await lockStock(tx);
+    const locked = saleId ? await returnedReason(new sql.Request(tx), saleId) : null;
+    if (locked) {
+      await tx.rollback();
+      return res.status(400).json({ error: locked });
+    }
     const sale = await checkSale(tx, req.body, saleId);
     if (sale.error) {
       await tx.rollback();
@@ -254,6 +267,8 @@ router.delete('/:id', async (req, res) => {
   try {
     if (req.user?.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin can delete a sale' });
     const pool = await getPool();
+    const locked = await returnedReason(pool.request(), Number(req.params.id));
+    if (locked) return res.status(400).json({ error: locked });
     await pool.request().input('id', sql.Int, req.params.id)
       .query('UPDATE SalesBilling SET IsActive = 0 WHERE SalesBillingId = @id');
     res.json({ success: true });

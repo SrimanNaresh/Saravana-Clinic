@@ -26,7 +26,7 @@ router.get('/stock', async (req, res) => {
                  SUM(CASE WHEN Kind = 'opening' THEN Qty ELSE 0 END) AS Opening,
                  SUM(CASE WHEN Kind = 'purchase' THEN Qty ELSE 0 END) AS StockIn,
                  -SUM(CASE WHEN Kind = 'return' THEN Qty ELSE 0 END) AS Returned,
-                 -SUM(CASE WHEN Kind = 'issue' THEN Qty ELSE 0 END) AS Sold,
+                 -SUM(CASE WHEN Kind IN ('issue', 'sales-return') THEN Qty ELSE 0 END) AS Sold,
                  SUM(CASE WHEN Kind = 'adjustment' THEN Qty ELSE 0 END) AS Adjustment,
                  SUM(Qty) AS CurrentStock,
                  COUNT(*) AS Events
