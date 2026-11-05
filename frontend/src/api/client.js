@@ -235,6 +235,10 @@ export const pharmacyReportApi = {
   // params: { from, to } as YYYY-MM-DD; either may be blank
   vendorPayments: (params) => api.get('/pharmacy-reports/vendor-payments', { params }).then((r) => r.data),
   vendorDocs: (vendorId, params) => api.get(`/pharmacy-reports/vendor-payments/${vendorId}`, { params }).then((r) => r.data),
+  allInOneScreens: () => api.get('/pharmacy-reports/all-in-one/screens').then((r) => r.data),
+  allInOneValues: (screen, column) => api.get('/pharmacy-reports/all-in-one/values', { params: { screen, column } }).then((r) => r.data),
+  // params: { screen, columns (comma-separated keys), from, to, filters (JSON { columnKey: [values] }) }
+  allInOne: (params) => api.get('/pharmacy-reports/all-in-one', { params }).then((r) => r.data),
 };
 export const salesBillingApi = {
   ...transactionApi('sales-billings'),

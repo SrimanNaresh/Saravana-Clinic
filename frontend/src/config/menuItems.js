@@ -86,6 +86,7 @@ export const MENU_GROUPS = [
         submenu: [
           { key: 'pharmacy.stock-report', label: 'Stock Report', to: '/pharmacy/stock-report' },
           { key: 'pharmacy.vendor-payments', label: 'Vendor Payments', to: '/pharmacy/vendor-payments' },
+          { key: 'pharmacy.all-in-one-report', label: 'All in One', to: '/pharmacy/all-in-one-report' },
         ],
       },
     ],

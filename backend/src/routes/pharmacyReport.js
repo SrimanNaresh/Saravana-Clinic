@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { docNoSql } from '../utils/docNumber.js';
 import { code6, EVENTS } from '../utils/stockEvents.js';
+import allInOneRoutes from './allInOneReport.js';
 
 // Pharmacy > Report: Stock Report (item-wise, with each item's history) and
 // Vendor Payments. Both read the documents themselves, so they always agree
@@ -189,5 +190,8 @@ router.get('/vendor-payments/:vendorId', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// All in One: any screen, with the columns picked.
+router.use('/all-in-one', allInOneRoutes);
 
 export default router;

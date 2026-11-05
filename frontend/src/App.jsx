@@ -50,6 +50,7 @@ import SalesReturnList from './pages/pharmacy/SalesReturnList.jsx';
 import SalesBilling from './pages/pharmacy/SalesBilling.jsx';
 import SalesBillingList from './pages/pharmacy/SalesBillingList.jsx';
 import StockReport from './pages/pharmacy/StockReport.jsx';
+import AllInOneReport from './pages/pharmacy/AllInOneReport.jsx';
 import VendorPayments from './pages/pharmacy/VendorPayments.jsx';
 import VendorPaymentEntry from './pages/pharmacy/VendorPaymentEntry.jsx';
 import PatientRecords from './pages/reports/PatientRecords.jsx';
@@ -186,6 +187,7 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/sales-billing-list" element={<SalesBillingList />} />
               <Route path="/pharmacy/stock-report" element={<StockReport />} />
               <Route path="/pharmacy/vendor-payments" element={<VendorPayments />} />
+              <Route path="/pharmacy/all-in-one-report" element={<AllInOneReport />} />
             </Routes>
           </div>
         </main>
