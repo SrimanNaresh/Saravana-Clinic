@@ -243,6 +243,10 @@ CREATE TABLE Pharmacy (
     CreatedAt   DATETIME NOT NULL DEFAULT GETDATE()
 );
 
+-- Soft delete: Delete sets IsActive = 0 so the row can be brought back.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='IsActive' AND Object_ID=Object_ID('Pharmacy'))
+    ALTER TABLE Pharmacy ADD IsActive BIT NOT NULL CONSTRAINT DF_Pharmacy_IsActive DEFAULT 1;
+
 -- Pharmacy > Supplier master: medicine suppliers used for stock purchases.
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Supplier' AND xtype='U')
 CREATE TABLE Supplier (
@@ -849,6 +853,72 @@ CREATE TABLE SalesReturnItem (
     CONSTRAINT FK_SalesReturnItem_Header FOREIGN KEY (SalesReturnId) REFERENCES SalesReturn(SalesReturnId) ON DELETE CASCADE,
     CONSTRAINT FK_SalesReturnItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
 );
+
+-- Pharmacy > Return > Sales Return: goods a customer brings back from one
+-- sale. Each line points at the sale line it returns (SalesLineId) and keeps
+-- that line's batch, unit and prices; Quantity is in packs like a sale's, so
+-- a Unit return of 5 from a 15-piece strip is 0.3333.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SalesBillingId' AND Object_ID=Object_ID('SalesReturn'))
+    ALTER TABLE SalesReturn ADD SalesBillingId INT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='MobileNo' AND Object_ID=Object_ID('SalesReturn'))
+    ALTER TABLE SalesReturn ADD MobileNo NVARCHAR(20) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SubTotal' AND Object_ID=Object_ID('SalesReturn'))
+    ALTER TABLE SalesReturn ADD SubTotal DECIMAL(12,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscPercent' AND Object_ID=Object_ID('SalesReturn'))
+    ALTER TABLE SalesReturn ADD DiscPercent DECIMAL(5,2) NOT NULL CONSTRAINT DF_SalesReturn_DiscPercent DEFAULT 0;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscountAmount' AND Object_ID=Object_ID('SalesReturn'))
+    ALTER TABLE SalesReturn ADD DiscountAmount DECIMAL(12,2) NOT NULL CONSTRAINT DF_SalesReturn_DiscountAmount DEFAULT 0;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='CreatedBy' AND Object_ID=Object_ID('SalesReturn'))
+    ALTER TABLE SalesReturn ADD CreatedBy NVARCHAR(100) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SalesLineId' AND Object_ID=Object_ID('SalesReturnItem'))
+    ALTER TABLE SalesReturnItem ADD SalesLineId INT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='Batch' AND Object_ID=Object_ID('SalesReturnItem'))
+    ALTER TABLE SalesReturnItem ADD Batch NVARCHAR(100) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='ExpiryDate' AND Object_ID=Object_ID('SalesReturnItem'))
+    ALTER TABLE SalesReturnItem ADD ExpiryDate DATE NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='SaleUnit' AND Object_ID=Object_ID('SalesReturnItem'))
+    ALTER TABLE SalesReturnItem ADD SaleUnit NVARCHAR(10) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='UnitQty' AND Object_ID=Object_ID('SalesReturnItem'))
+    ALTER TABLE SalesReturnItem ADD UnitQty DECIMAL(10,2) NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='PackSize' AND Object_ID=Object_ID('SalesReturnItem'))
+    ALTER TABLE SalesReturnItem ADD PackSize INT NULL;
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='DiscPercent' AND Object_ID=Object_ID('SalesReturnItem'))
+    ALTER TABLE SalesReturnItem ADD DiscPercent DECIMAL(5,2) NOT NULL CONSTRAINT DF_SalesReturnItem_DiscPercent DEFAULT 0;
+IF EXISTS (SELECT * FROM sys.columns WHERE Name='Quantity' AND Object_ID=Object_ID('SalesReturnItem') AND scale < 4)
+    ALTER TABLE SalesReturnItem ALTER COLUMN Quantity DECIMAL(12,4) NOT NULL;
+
+-- Pharmacy > Stock In > Adjustment: stock corrections per batch. Adjust In
+-- adds to the batch (or starts a new one), Adjust Out takes from it; each at
+-- its own price. CurStock is the batch's stock when the line was saved.
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockAdjustment' AND xtype='U')
+CREATE TABLE StockAdjustment (
+    AdjustmentId INT IDENTITY(1,1) PRIMARY KEY,
+    AdjDate      DATE NOT NULL,
+    Remarks      NVARCHAR(300) NULL,
+    InTotal      DECIMAL(12,2) NOT NULL DEFAULT 0,
+    OutTotal     DECIMAL(12,2) NOT NULL DEFAULT 0,
+    IsActive     BIT NOT NULL DEFAULT 1,
+    CreatedBy    NVARCHAR(100) NULL,
+    CreatedAt    DATETIME NOT NULL DEFAULT GETDATE()
+);
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='StockAdjustmentItem' AND xtype='U')
+CREATE TABLE StockAdjustmentItem (
+    LineId       INT IDENTITY(1,1) PRIMARY KEY,
+    AdjustmentId INT NOT NULL,
+    ItemId       INT NOT NULL,
+    BatchNo      NVARCHAR(100) NOT NULL DEFAULT '',
+    CurStock     DECIMAL(12,4) NOT NULL DEFAULT 0,
+    InQty        DECIMAL(10,2) NOT NULL DEFAULT 0,
+    InPrice      DECIMAL(10,2) NOT NULL DEFAULT 0,
+    OutQty       DECIMAL(10,2) NOT NULL DEFAULT 0,
+    OutPrice     DECIMAL(10,2) NOT NULL DEFAULT 0,
+    CONSTRAINT FK_StockAdjustmentItem_Header FOREIGN KEY (AdjustmentId) REFERENCES StockAdjustment(AdjustmentId),
+    CONSTRAINT FK_StockAdjustmentItem_Item FOREIGN KEY (ItemId) REFERENCES PharmacyItem(ItemId)
+);
+-- MRP per pack for the batch; a batch started by an Adjust In takes its MRP
+-- from here when no Stock In has one.
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='MRP' AND Object_ID=Object_ID('StockAdjustmentItem'))
+    ALTER TABLE StockAdjustmentItem ADD MRP DECIMAL(10,2) NULL;
 
 -- Pharmacy > Purchase > Purchase Master: which item is bought from which
 -- vendor, in what quantity and unit.

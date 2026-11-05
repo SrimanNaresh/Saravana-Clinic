@@ -43,6 +43,10 @@ import StockIn from './pages/pharmacy/StockIn.jsx';
 import StockInList from './pages/pharmacy/StockInList.jsx';
 import StockReturnMaster from './pages/pharmacy/StockReturnMaster.jsx';
 import StockReturnList from './pages/pharmacy/StockReturnList.jsx';
+import SalesReturnMaster from './pages/pharmacy/SalesReturnMaster.jsx';
+import StockAdjustment from './pages/pharmacy/StockAdjustment.jsx';
+import StockAdjustmentList from './pages/pharmacy/StockAdjustmentList.jsx';
+import SalesReturnList from './pages/pharmacy/SalesReturnList.jsx';
 import SalesBilling from './pages/pharmacy/SalesBilling.jsx';
 import SalesBillingList from './pages/pharmacy/SalesBillingList.jsx';
 import StockReport from './pages/pharmacy/StockReport.jsx';
@@ -169,8 +173,12 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/purchase-order-list" element={<PurchaseOrderList />} />
               <Route path="/pharmacy/stock-in" element={<StockIn />} />
               <Route path="/pharmacy/stock-in-list" element={<StockInList />} />
+              <Route path="/pharmacy/stock-adjustment" element={<StockAdjustment />} />
+              <Route path="/pharmacy/stock-adjustment-list" element={<StockAdjustmentList />} />
               <Route path="/pharmacy/return" element={<StockReturnMaster />} />
               <Route path="/pharmacy/return-list" element={<StockReturnList />} />
+              <Route path="/pharmacy/sales-return" element={<SalesReturnMaster />} />
+              <Route path="/pharmacy/sales-return-list" element={<SalesReturnList />} />
               <Route path="/pharmacy/vendor-master" element={<VendorMaster />} />
               <Route path="/pharmacy/vendor-list" element={<VendorList />} />
               <Route path="/pharmacy/vendor-payment" element={<VendorPaymentEntry />} />

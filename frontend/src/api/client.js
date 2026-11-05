@@ -201,6 +201,33 @@ export const stockReturnApi = {
   remove: (id) => api.delete(`/stock-returns/${id}`).then((r) => r.data),
 };
 
+export const stockAdjustmentApi = {
+  list: (search = '') => api.get('/stock-adjustments', { params: { search } }).then((r) => r.data),
+  get: (id) => api.get(`/stock-adjustments/${id}`).then((r) => r.data),
+  // { purchaseRate, batches: [{ Batch, ExpiryDate, CurStock, PurchaseRate }] }, with or without stock
+  batches: (itemId, excludeAdjustmentId) => api.get(`/stock-adjustments/batches/${itemId}`, { params: { excludeAdjustmentId } }).then((r) => r.data),
+  create: (data) => api.post('/stock-adjustments', data).then((r) => r.data),
+  update: (id, data) => api.put(`/stock-adjustments/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/stock-adjustments/${id}`).then((r) => r.data),
+};
+
+// Older purchase records (their screens are hidden); only delete is used now.
+export const stockInwardApi = { remove: (id) => api.delete(`/stock-inwards/${id}`).then((r) => r.data) };
+export const purchaseReturnApi = { remove: (id) => api.delete(`/purchase-returns/${id}`).then((r) => r.data) };
+
+export const salesReturnApi = {
+  list: (search = '') => api.get('/sales-returns', { params: { search } }).then((r) => r.data),
+  get: (id) => api.get(`/sales-returns/${id}`).then((r) => r.data),
+  // Customers that have a sale; sales by { date } or { customer, mobile }
+  customers: () => api.get('/sales-returns/customers').then((r) => r.data),
+  sales: (params) => api.get('/sales-returns/sales', { params }).then((r) => r.data),
+  // A sale's head and lines with Sold / Returned / Left
+  saleLines: (saleId, excludeReturnId) => api.get(`/sales-returns/sale-lines/${saleId}`, { params: { excludeReturnId } }).then((r) => r.data),
+  create: (data) => api.post('/sales-returns', data).then((r) => r.data),
+  update: (id, data) => api.put(`/sales-returns/${id}`, data).then((r) => r.data),
+  remove: (id) => api.delete(`/sales-returns/${id}`).then((r) => r.data),
+};
+
 export const pharmacyReportApi = {
   // params: { search, category, show: 'history' | 'instock' | 'outofstock' | 'all' }
   stock: (params) => api.get('/pharmacy-reports/stock', { params }).then((r) => r.data),

@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wallet, ChevronRight, ChevronDown, X } from 'lucide-react';
+import { Wallet, ChevronRight, ChevronDown, X, Trash2 } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
-import { pharmacyReportApi } from '../../api/client.js';
+import { pharmacyReportApi, stockInApi, stockReturnApi, stockInwardApi, purchaseReturnApi } from '../../api/client.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 
 const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-GB');
@@ -11,14 +12,39 @@ const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-GB');
 // Where a line opens. Older Stock Inward entries and Purchase Returns have no
 // screen any more, so their lines don't open anything.
 const DOC_PAGE = { 'stock-in': '/pharmacy/stock-in-list', return: '/pharmacy/return-list' };
+// Lines an Admin can delete from here (soft delete; the server checks the
+// role and refuses a Stock In / Stock Inward whose stock has been used).
+const DOC_DELETE = {
+  'stock-in': { api: stockInApi, kind: 'Stock In', note: 'Its stock is taken off.' },
+  return: { api: stockReturnApi, kind: 'Return', note: 'The returned quantity goes back into stock.' },
+  'stock-inward': { api: stockInwardApi, kind: 'Stock Inward', note: 'Its stock is taken off.' },
+  'purchase-return': { api: purchaseReturnApi, kind: 'Purchase Return', note: 'The returned quantity goes back into stock.' },
+};
 
-// One vendor's Stock Ins and Returns, shown under its row.
-function VendorDocs({ vendorId, from, to }) {
+// One vendor's Stock Ins and Returns, shown under its row. onDeleted runs
+// after a line is deleted so the vendor totals reload.
+function VendorDocs({ vendorId, from, to, isAdmin, show, onDeleted }) {
   const navigate = useNavigate();
   const [rows, setRows] = useState(null);
-  useEffect(() => {
+  const load = useCallback(() => {
     pharmacyReportApi.vendorDocs(vendorId, { from, to }).then(setRows).catch(() => setRows([]));
   }, [vendorId, from, to]);
+  useEffect(() => { load(); }, [load]);
+
+  const remove = async (d) => {
+    const del = DOC_DELETE[d.Type];
+    const { kind } = del;
+    if (!confirm(`Delete ${kind} ${d.DocNo} (₹${money(d.Total)})?\n\n${del.note}`)) return;
+    try {
+      await del.api.remove(d.DocId);
+      show(`${kind} ${d.DocNo} deleted`, 'success');
+      load();
+      onDeleted();
+    } catch (err) {
+      show(err.response?.data?.error || 'Delete failed', 'error');
+    }
+  };
+
   if (!rows) return <Spinner />;
   if (!rows.length) return <p className="px-3 py-2 text-sm text-ink-400">Nothing in this period.</p>;
   return (
@@ -35,6 +61,7 @@ function VendorDocs({ vendorId, from, to }) {
           <th className="px-2 py-1 text-right">Amount</th>
           <th className="px-2 py-1 text-right">GST</th>
           <th className="px-2 py-1 text-right">Total</th>
+          {isAdmin && <th className="px-2 py-1 text-right">Delete</th>}
         </tr>
       </thead>
       <tbody>
@@ -60,6 +87,16 @@ function VendorDocs({ vendorId, from, to }) {
               <td className={`px-2 py-1 text-right ${ret ? 'text-red-600' : ''}`}>{sign}{money(d.Amount)}</td>
               <td className={`px-2 py-1 text-right ${ret ? 'text-red-600' : ''}`}>{sign}{money(d.GST)}</td>
               <td className={`px-2 py-1 text-right font-medium ${ret ? 'text-red-600' : ''}`}>{sign}{money(d.Total)}</td>
+              {isAdmin && (
+                <td className="px-2 py-0.5 text-right">
+                  {DOC_DELETE[d.Type] && (
+                    <button
+                      type="button" className="rounded p-1 text-red-500 hover:bg-red-50" title={`Delete ${d.DocNo} (Admin only)`}
+                      onClick={(e) => { e.stopPropagation(); remove(d); }}
+                    ><Trash2 size={13} /></button>
+                  )}
+                </td>
+              )}
             </tr>
           );
         })}
@@ -72,6 +109,8 @@ function VendorDocs({ vendorId, from, to }) {
 // Stock In Total less Return Total — for a period (empty dates = all time).
 export default function VendorPayments() {
   const { toast, show } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState('');
@@ -157,7 +196,7 @@ export default function VendorPayments() {
                       </tr>
                       {open && (
                         <tr className="bg-ink-50/60">
-                          <td colSpan={8} className="px-4 py-2"><VendorDocs vendorId={r.VendorId} from={from} to={to} /></td>
+                          <td colSpan={8} className="px-4 py-2"><VendorDocs vendorId={r.VendorId} from={from} to={to} isAdmin={isAdmin} show={show} onDeleted={load} /></td>
                         </tr>
                       )}
                     </Fragment>
