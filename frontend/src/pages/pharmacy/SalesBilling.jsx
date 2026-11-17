@@ -36,6 +36,18 @@ export default function SalesBilling() {
   const [transDate, setTransDate] = useState(today());
   const [customerName, setCustomerName] = useState('');
   const [mobileNo, setMobileNo] = useState('');
+  // Patient / prescription / doctor (optional) and payment.
+  const [patients, setPatients] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [patientId, setPatientId] = useState('');
+  const [prescriptions, setPrescriptions] = useState([]);
+  const [prescriptionId, setPrescriptionId] = useState('');
+  const [doctorId, setDoctorId] = useState('');
+  const [unmatched, setUnmatched] = useState([]); // prescription medicines not found in Item Master
+  const [payMode, setPayMode] = useState('Cash');
+  const [paidAmount, setPaidAmount] = useState(''); // '' = the whole Net Amount (0 for Credit)
+  const [payRef, setPayRef] = useState('');
+  const payModeRef = useRef(null);
   const [lines, setLines] = useState([emptyLine()]);
   const [billDisc, setBillDisc] = useState(''); // the bill's Discount %
   const [roundOn, setRoundOn] = useState(true); // Round Off the Total to the nearest rupee
@@ -60,6 +72,17 @@ export default function SalesBilling() {
 
   useEffect(() => { pharmacyItemApi.list().then(setCatalog).catch(() => show('Failed to load items', 'error')); }, [show]);
   useEffect(() => { clinicApi.get().then(setClinic).catch(() => setClinic(null)); }, []);
+  const loadPatients = () => salesBillingApi.lookupPatients().then(setPatients).catch(() => setPatients([]));
+  useEffect(() => {
+    loadPatients();
+    salesBillingApi.lookupDoctors().then(setDoctors).catch(() => setDoctors([]));
+  }, []);
+  const patientById = useMemo(() => new Map(patients.map((p) => [String(p.PatientId), p])), [patients]);
+  const patientOptions = useMemo(() => patients.map((p) => ({
+    value: String(p.PatientId), label: `${p.Name}${p.MobileNo ? ` · ${p.MobileNo}` : ''} · #${p.PatientId}`,
+    hint: p.Balance > 0 ? `Due ₹${Number(p.Balance).toFixed(2)}` : '',
+  })), [patients]);
+  const patient = patientById.get(patientId);
 
   const itemById = useMemo(() => new Map(catalog.map((i) => [String(i.ItemId), i])), [catalog]);
   const itemOptions = useMemo(() => catalog.map((i) => ({ value: String(i.ItemId), label: i.Name })), [catalog]);
@@ -143,6 +166,49 @@ export default function SalesBilling() {
     }
   };
 
+  // Picking a patient fills Customer Name / Mobile and lists their prescriptions.
+  const pickPatient = async (id, keepPrescription = false) => {
+    setPatientId(id || '');
+    if (!keepPrescription) { setPrescriptionId(''); setUnmatched([]); }
+    setPrescriptions([]);
+    const p = patientById.get(id);
+    if (p) {
+      setCustomerName(p.Name);
+      setMobileNo(p.MobileNo || '');
+      try { setPrescriptions(await salesBillingApi.lookupPrescriptions(id)); } catch { show('Failed to load prescriptions', 'error'); }
+    }
+  };
+  // Picking a prescription adds its medicines that match an item (exact name,
+  // then starts with, then contains); the rest are listed for picking by hand.
+  const findItem = (name) => {
+    const n = name.trim().toLowerCase();
+    if (!n) return null;
+    const active = catalog.filter((i) => i.Status !== 'Inactive');
+    return active.find((i) => i.Name.toLowerCase() === n)
+      || active.find((i) => i.Name.toLowerCase().startsWith(n))
+      || active.find((i) => i.Name.toLowerCase().includes(n)) || null;
+  };
+  const pickPrescription = (id) => {
+    setPrescriptionId(id);
+    setUnmatched([]);
+    const pr = prescriptions.find((x) => String(x.PrescriptionId) === String(id));
+    if (!pr) return;
+    if (pr.DoctorId) setDoctorId(String(pr.DoctorId));
+    const have = new Set(lines.filter((l) => l.itemId).map((l) => l.itemId));
+    const add = [];
+    const missing = [];
+    for (const med of pr.items) {
+      const it = findItem(med.name);
+      if (!it) missing.push(med.name);
+      else if (!have.has(String(it.ItemId))) { have.add(String(it.ItemId)); add.push(String(it.ItemId)); }
+    }
+    setUnmatched(missing);
+    if (!add.length) return;
+    const added = add.map((itemId) => ({ ...emptyLine(), itemId }));
+    setLines((ls) => [...ls.filter((l) => l.itemId), ...added, emptyLine()]);
+    added.forEach((l) => pickItem(l.key, l.itemId));
+  };
+
   // Stock of each line's batch (in packs), and how many packs all lines take from it.
   const batchOfLine = (l) => l.batches.find((b) => b.Batch === l.batch);
   const packsOf = (l) => (Number(l.qty) || 0) / (l.saleUnit === 'unit' ? sizeOf(l) : 1);
@@ -179,7 +245,16 @@ export default function SalesBilling() {
   const belowCost = filled.length > 0 && total < totalCost;
   const roundOff = roundOn ? roundOffOf(total) : 0;
   const netAmount = round2(total + roundOff);
-  const hasProblem = billDiscBad || belowCost
+  // Payment: Paid starts as the whole Net Amount (0 for Credit); the rest is Due.
+  const paid = paidAmount === '' ? (payMode === 'Credit' ? 0 : netAmount) : round2(Number(paidAmount) || 0);
+  const due = round2(netAmount - paid);
+  const needsRef = (payMode === 'UPI' || payMode === 'Card') && paid > 0;
+  const payProblem = paidAmount !== '' && !(Number(paidAmount) >= 0) ? 'Paid must be 0 or more'
+    : paid > netAmount + 0.005 ? `Paid can't be more than ${money(netAmount)}`
+      : due > 0 && !patientId ? 'Pick a patient to give credit'
+        : needsRef && !payRef.trim() ? (payMode === 'UPI' ? 'Enter the UPI transaction id' : 'Enter the card reference')
+          : null;
+  const hasProblem = billDiscBad || belowCost || !!payProblem
     || filled.some((l) => l.loading || problemOf(l) || !(Number(l.qty) > 0) || !(Number(l.price) > 0));
 
   const resetForm = () => {
@@ -190,6 +265,14 @@ export default function SalesBilling() {
     setBillDisc('');
     setRoundOn(true);
     setTransDate(today());
+    setPatientId('');
+    setPrescriptions([]);
+    setPrescriptionId('');
+    setDoctorId('');
+    setUnmatched([]);
+    setPayMode('Cash');
+    setPaidAmount('');
+    setPayRef('');
   };
 
   // A sale opened from the list: its lines get their batch lists with this
@@ -214,6 +297,13 @@ export default function SalesBilling() {
       setBillDisc(Number(sale.DiscPercent) ? String(Number(sale.DiscPercent)) : '');
       setRoundOn(Number(sale.RoundOff) !== 0);
       setLines([...built, emptyLine()]);
+      setPatientId(sale.PatientId ? String(sale.PatientId) : '');
+      if (sale.PatientId) salesBillingApi.lookupPrescriptions(sale.PatientId).then(setPrescriptions).catch(() => setPrescriptions([]));
+      setPrescriptionId(sale.PrescriptionId ? String(sale.PrescriptionId) : '');
+      setDoctorId(sale.DoctorId ? String(sale.DoctorId) : '');
+      setPayMode(sale.PayMode || 'Cash');
+      setPaidAmount(sale.PaidAmount == null ? '' : String(Number(sale.PaidAmount)));
+      setPayRef(sale.PayReference || '');
     } catch {
       show('Failed to load sale for editing', 'error');
     }
@@ -234,11 +324,14 @@ export default function SalesBilling() {
     if (!customerName.trim()) return show('Customer Name is required', 'error');
     if (mobileNo && !/^\+?[0-9][0-9\s-]*$/.test(mobileNo.trim())) return show('Mobile No must contain numbers only', 'error');
     if (!filled.length) return show('Add at least one item', 'error');
+    if (payProblem) return show(payProblem, 'error');
     if (hasProblem) return show('Fix the rows marked in red first', 'error');
     setSaving(true);
     try {
       const payload = {
         transDate, customerName, mobileNo, discPercent: Number(billDisc) || 0, roundOff: roundOn,
+        patientId: patientId ? Number(patientId) : null, prescriptionId: prescriptionId ? Number(prescriptionId) : null,
+        doctorId: doctorId ? Number(doctorId) : null, payMode, paidAmount: paidAmount === '' ? '' : Number(paidAmount), payReference: payRef.trim(),
         items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, saleUnit: l.saleUnit, quantity: Number(l.qty), rate: Number(l.price), discPercent: Number(l.disc) || 0 })),
       };
       // The printout is built from the bill as saved (with its stored GST).
@@ -254,6 +347,7 @@ export default function SalesBilling() {
       } else {
         const saved = await salesBillingApi.create(payload);
         batchCache.current.clear();
+        if (patientId) loadPatients();
         show(`Saved ${saved.Code}`, 'success');
         setPrintBill(await billOf(saved));
         if (print) setPrintNow({});
@@ -276,7 +370,13 @@ export default function SalesBilling() {
   return (
     <div>
       <div className="card no-print">
-        <form onSubmit={save}>
+        <form
+          onSubmit={save}
+          onKeyDown={(e) => {
+            if (e.key === 'F8') { e.preventDefault(); payModeRef.current?.focus(); }
+            else if (e.key === 'Enter' && e.ctrlKey && !saving && !hasProblem) { e.preventDefault(); save(e, true); }
+          }}
+        >
           <CardHeader
             icon={Receipt}
             title={editingId ? 'Edit Sale' : 'Sales'}
@@ -297,12 +397,22 @@ export default function SalesBilling() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-[9rem_minmax(0,1.6fr)_minmax(0,1.3fr)_9.5rem_minmax(0,1.6fr)_minmax(0,1fr)]">
             <div>
               <label className="label">Date *</label>
               <input type="date" className="input" value={transDate} onChange={(e) => setTransDate(e.target.value)} />
             </div>
-            <div className="lg:col-span-2">
+            <div>
+              <label className="label">Patient <span className="font-normal text-ink-400">(name / mobile / ID; empty = walk-in)</span></label>
+              <div className="flex gap-1">
+                <div className="min-w-0 flex-1">
+                  <SearchPick className="input" placeholder="Walk-in customer" options={patientOptions} value={patientId} onChange={(v) => pickPatient(v)} />
+                </div>
+                {patientId && <button type="button" className="btn-secondary px-2" title="Clear patient (walk-in)" onClick={() => pickPatient('')}><X size={14} /></button>}
+              </div>
+              {patient?.Balance > 0 && <p className="mt-0.5 text-[11px] font-medium text-amber-700">Credit due ₹{money(patient.Balance)}</p>}
+            </div>
+            <div>
               <label className="label">Customer Name *</label>
               <input className="input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer name" />
             </div>
@@ -310,7 +420,32 @@ export default function SalesBilling() {
               <label className="label">Mobile No</label>
               <input type="tel" inputMode="numeric" className="input" value={mobileNo} onChange={(e) => setMobileNo(e.target.value)} placeholder="e.g. 98765 43210" />
             </div>
+            <div>
+              <label className="label">Prescription</label>
+              <select className="input" value={prescriptionId} disabled={!patientId} onChange={(e) => pickPrescription(e.target.value)}>
+                <option value="">{!patientId ? 'Pick a patient first' : prescriptions.length ? 'None (pick to add its medicines)' : 'No prescriptions'}</option>
+                {prescriptions.map((p) => (
+                  <option key={p.PrescriptionId} value={p.PrescriptionId}>
+                    {`${new Date(p.CreatedAt).toLocaleDateString('en-GB')}${p.DoctorName ? ` · ${p.DoctorName}` : ''} · ${p.items.length} medicine(s)`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Doctor</label>
+              <select className="input" value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
+                <option value="">—</option>
+                {doctors.map((d) => <option key={d.EmployeeId} value={d.EmployeeId}>{d.Name}</option>)}
+              </select>
+            </div>
           </div>
+
+          {unmatched.length > 0 && (
+            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-800">
+              <span>Not found in Item Master (pick by hand): <b>{unmatched.join(', ')}</b></span>
+              <button type="button" className="ml-auto text-amber-500 hover:text-amber-700" title="Close" onClick={() => setUnmatched([])}><X size={14} /></button>
+            </div>
+          )}
 
           <div className="ph-wrap mt-3">
             {/* Fixed column shares (adding up to 100%) so every heading stays on one line. */}
@@ -466,13 +601,42 @@ export default function SalesBilling() {
                   <td className={`px-2 py-1 ${num} text-[15px] font-bold text-brand-800`}>{money(netAmount)}</td>
                   <td />
                 </tr>
+                <tr className="!bg-white font-normal text-ink-700 [&>td]:border-0">
+                  <td className="px-2 py-1 text-right text-[12px] text-ink-500" colSpan={12}>
+                    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                      {payProblem && <span className="mr-2 text-red-600">{payProblem}</span>}
+                      <span title="F8 jumps here">Pay Mode</span>
+                      <select
+                        ref={payModeRef} className="h-6 rounded border border-ink-200 bg-white px-1.5 py-0 text-[13px] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                        value={payMode} onChange={(e) => { setPayMode(e.target.value); setPaidAmount(''); }}
+                      >
+                        {['Cash', 'UPI', 'Card', 'Credit'].map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                      Paid
+                      <input
+                        type="number" step="0.01" min="0" placeholder={money(paid)}
+                        className={`h-6 w-24 rounded border bg-white px-1.5 py-0 text-right text-[13px] tabular-nums no-spin focus:outline-none focus:ring-2 ${payProblem && payProblem.startsWith('Paid') ? 'border-red-400 bg-red-50 text-red-700 focus:ring-red-100' : 'border-ink-200 focus:border-brand-400 focus:ring-brand-100'}`}
+                        value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} title="Amount paid now; empty = the whole Net Amount"
+                      />
+                      {(payMode === 'UPI' || payMode === 'Card') && (
+                        <input
+                          className="h-6 w-32 rounded border border-ink-200 bg-white px-1.5 py-0 text-[13px] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                          maxLength={50} placeholder={payMode === 'UPI' ? 'UPI txn id' : 'Card last 4'} value={payRef} onChange={(e) => setPayRef(e.target.value)}
+                        />
+                      )}
+                      <span className="font-medium">Due</span>
+                    </span>
+                  </td>
+                  <td className={`px-2 py-1 ${num} ${due > 0 ? 'font-semibold text-red-600' : 'text-ink-400'}`}>{money(Math.max(due, 0))}</td>
+                  <td />
+                </tr>
               </tfoot>
             </table>
           </div>
 
           <div className="mt-3 flex items-center justify-end gap-2">
             <p className="mr-auto text-[12px] text-ink-400">
-              <kbd className="rounded border border-ink-200 bg-ink-50 px-1">Enter</kbd> moves Item → Batch → Sell by → Quantity → Disc% → next item. ↑ ↓ change the Batch / Sell by; ← → reach Sale Price.
+              <kbd className="rounded border border-ink-200 bg-ink-50 px-1">Enter</kbd> moves Item → Batch → Sell by → Quantity → Disc% → next item. ↑ ↓ change the Batch / Sell by; ← → reach Sale Price. <kbd className="rounded border border-ink-200 bg-ink-50 px-1">F8</kbd> Pay Mode · <kbd className="rounded border border-ink-200 bg-ink-50 px-1">Ctrl+Enter</kbd> Save &amp; Print.
             </p>
             <button type="button" className="btn-secondary" onClick={() => (editingId ? navigate('/pharmacy/sales-billing-list') : resetForm())}>
               <X size={16} /> Cancel

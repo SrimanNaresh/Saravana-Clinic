@@ -3,6 +3,7 @@ import { getPool, sql } from '../db/pool.js';
 import { batchStock } from '../utils/batchStock.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
 import { unitsPerPack, saleLineAmount, saleBill, saleGst, roundOffOf } from '../utils/purchaseCalc.js';
+import { balanceSql, negativeBalance } from '../utils/patientCredit.js';
 
 // Pharmacy > Sales: counter sales, each line sold from one batch, by the Pack
 // or by the Unit (one piece; price and quantity per piece). Stock is never
@@ -15,6 +16,8 @@ const PHONE = /^\+?[0-9][0-9\s-]*$/;
 const round2 = (n) => Math.round(n * 100) / 100;
 const round4 = (n) => Math.round(n * 10000) / 10000;
 const CODE = docNoSql('S', 'h.SalesBillingId');
+export const PAY_MODES = ['Cash', 'UPI', 'Card', 'Credit'];
+const NEEDS_REF = ['UPI', 'Card'];
 
 // Serialises stock-changing saves so two bills can't both take the last units.
 const lockStock = (tx) => new sql.Request(tx).query(
@@ -30,6 +33,7 @@ router.get('/', async (req, res) => {
       .input('search', sql.NVarChar, `%${search}%`)
       .query(`
         SELECT h.SalesBillingId, ${CODE} AS Code, h.TransDate, h.CustomerName, h.MobileNo, h.TotalAmount, h.CreatedAt,
+               h.PatientId, h.PayMode, h.DueAmount,
                li.ItemNames, ISNULL(li.TotalQty, 0) AS TotalQty
         FROM SalesBilling h
         OUTER APPLY (
@@ -43,6 +47,61 @@ router.get('/', async (req, res) => {
         ORDER BY h.SalesBillingId DESC
       `);
     res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- Lookups for the Sales screen (patient, prescription, doctor) ----
+
+// Patients by name, mobile or Patient ID (top 20; all of them with no search),
+// with their credit balance.
+router.get('/lookup/patients', async (req, res) => {
+  try {
+    const q = String(req.query.search || '').trim();
+    const pool = await getPool();
+    const r = await pool.request().input('q', sql.NVarChar, `%${q}%`).input('id', sql.Int, /^\d+$/.test(q) ? Number(q) : null).query(`
+      SELECT TOP (CASE WHEN @q = '%%' THEN 5000 ELSE 20 END) p.PatientId, p.Name, p.MobileNo, p.Age, ${balanceSql('p.PatientId')} AS Balance
+      FROM Patient p
+      WHERE p.IsActive = 1 AND (@q = '%%' OR p.Name LIKE @q OR p.MobileNo LIKE @q OR p.PatientId = @id)
+      ORDER BY CASE WHEN p.PatientId = @id THEN 0 ELSE 1 END, p.PatientId DESC`);
+    res.json(r.recordset.map((p) => ({ ...p, Balance: Math.round(Number(p.Balance || 0) * 100) / 100 })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// A patient's last 10 prescriptions with their medicines and doctor.
+router.get('/lookup/prescriptions/:patientId', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input('pid', sql.Int, Number(req.params.patientId) || 0).query(`
+      SELECT TOP 10 pr.PrescriptionId, pr.CreatedAt, pr.Diagnosis, pr.DoctorId, e.Name AS DoctorName
+      FROM Prescription pr LEFT JOIN Employee e ON e.EmployeeId = pr.DoctorId
+      WHERE pr.PatientId = @pid ORDER BY pr.CreatedAt DESC, pr.PrescriptionId DESC;
+      SELECT pi.PrescriptionId, pi.MedicineName, pi.Dosage, pi.Frequency, pi.Duration, m.MedicineName AS MasterName
+      FROM PrescriptionItem pi
+      JOIN Prescription pr ON pr.PrescriptionId = pi.PrescriptionId AND pr.PatientId = @pid
+      LEFT JOIN Medication m ON m.MedicationId = pi.MedicationId
+      ORDER BY pi.ItemId`);
+    const [heads, items] = r.recordsets;
+    res.json(heads.map((h) => ({
+      ...h,
+      items: items.filter((i) => i.PrescriptionId === h.PrescriptionId)
+        .map((i) => ({ name: i.MedicineName || i.MasterName || '', dosage: i.Dosage, frequency: i.Frequency, duration: i.Duration }))
+        .filter((i) => i.name),
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Doctors (Employee Type 'Doctor').
+router.get('/lookup/doctors', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().query("SELECT EmployeeId, Name FROM Employee WHERE IsActive = 1 AND EmpType = 'Doctor' ORDER BY Name");
+    res.json(r.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -89,8 +148,13 @@ router.get('/:id', async (req, res) => {
     const head = await pool.request().input('id', sql.Int, req.params.id).query(`
       SELECT h.SalesBillingId, ${CODE} AS Code, h.TransDate, h.CustomerName, h.MobileNo, h.TotalAmount,
              ISNULL(h.SubTotal, h.TotalAmount) AS SubTotal, ISNULL(h.DiscPercent, 0) AS DiscPercent, ISNULL(h.DiscountAmount, 0) AS DiscountAmount, h.RoundOff,
-             h.TaxableAmount, h.CGSTAmount, h.SGSTAmount, h.IGSTAmount
-      FROM SalesBilling h WHERE h.SalesBillingId = @id AND h.IsActive = 1
+             h.TaxableAmount, h.CGSTAmount, h.SGSTAmount, h.IGSTAmount,
+             h.PatientId, p.Name AS PatientName, h.PrescriptionId, h.DoctorId, e.Name AS DoctorName,
+             h.PayMode, h.PayReference, h.PaidAmount, h.DueAmount
+      FROM SalesBilling h
+      LEFT JOIN Patient p ON p.PatientId = h.PatientId
+      LEFT JOIN Employee e ON e.EmployeeId = h.DoctorId
+      WHERE h.SalesBillingId = @id AND h.IsActive = 1
     `);
     if (!head.recordset.length) return res.status(404).json({ error: 'Sale not found' });
     const lines = await pool.request().input('id', sql.Int, req.params.id).query(LINES_SQL);
@@ -178,7 +242,45 @@ export async function checkSale(tx, body, saleId) {
   // GST is worked out here from the item's GST % today and saved on each line.
   const gst = saleGst(lines, discPercent);
   lines.forEach((l, i) => Object.assign(l, gst.lines[i]));
-  return { transDate, customerName, mobileNo: mobileNo || null, lines, discPercent, ...bill, roundOff, total: round2(bill.total + roundOff), gst };
+  const total = round2(bill.total + roundOff);
+
+  // Patient / prescription / doctor (all optional).
+  const patientId = Number(body.patientId) || null;
+  if (patientId) {
+    const p = await new sql.Request(tx).input('pid', sql.Int, patientId).query('SELECT PatientId FROM Patient WHERE PatientId = @pid AND IsActive = 1');
+    if (!p.recordset.length) return { error: 'Patient not found' };
+  }
+  const prescriptionId = Number(body.prescriptionId) || null;
+  let doctorId = Number(body.doctorId) || null;
+  if (prescriptionId) {
+    if (!patientId) return { error: 'Pick the patient for this prescription' };
+    const pr = await new sql.Request(tx).input('prId', sql.Int, prescriptionId).query('SELECT PatientId, DoctorId FROM Prescription WHERE PrescriptionId = @prId');
+    if (!pr.recordset.length || pr.recordset[0].PatientId !== patientId) return { error: "That prescription isn't this patient's" };
+    doctorId = doctorId || pr.recordset[0].DoctorId || null;
+  }
+  if (doctorId) {
+    const d = await new sql.Request(tx).input('did', sql.Int, doctorId).query("SELECT EmployeeId FROM Employee WHERE EmployeeId = @did AND EmpType = 'Doctor'");
+    if (!d.recordset.length) return { error: 'Doctor not found' };
+  }
+
+  // Payment: Paid defaults to the whole Net Amount (0 for Credit); what isn't
+  // paid is Due, which is credit and so needs a registered patient.
+  const payMode = PAY_MODES.includes(body.payMode) ? body.payMode : (body.payMode ? null : 'Cash');
+  if (!payMode) return { error: `Pay Mode must be one of ${PAY_MODES.join(', ')}` };
+  const paidRaw = body.paidAmount;
+  const paid = paidRaw === '' || paidRaw == null ? (payMode === 'Credit' ? 0 : total) : round2(Number(paidRaw));
+  if (!(paid >= 0)) return { error: 'Paid must be 0 or more' };
+  if (paid > total + 0.005) return { error: `Paid can't be more than the Net Amount ${total.toFixed(2)}` };
+  const due = round2(total - paid);
+  if (due > 0 && !patientId) return { error: 'Pick a registered patient to give credit (Paid is less than the Net Amount)' };
+  const payReference = String(body.payReference || '').trim();
+  if (payReference.length > 50) return { error: 'Reference must be at most 50 characters' };
+  if (NEEDS_REF.includes(payMode) && paid > 0 && !payReference) return { error: `Enter the ${payMode === 'UPI' ? 'UPI transaction id' : 'card reference (last 4 digits)'}` };
+
+  return {
+    transDate, customerName, mobileNo: mobileNo || null, lines, discPercent, ...bill, roundOff, total, gst,
+    patientId, prescriptionId, doctorId, payMode, paid, due, payReference: payReference || null,
+  };
 }
 
 async function insertLines(tx, saleId, lines) {
@@ -246,13 +348,24 @@ async function saveSale(req, res, saleId) {
       .input('taxable', sql.Decimal(12, 2), sale.gst.taxableAmount)
       .input('cgst', sql.Decimal(12, 2), sale.gst.cgstAmount)
       .input('sgst', sql.Decimal(12, 2), sale.gst.sgstAmount)
-      .input('igst', sql.Decimal(12, 2), sale.gst.igstAmount);
+      .input('igst', sql.Decimal(12, 2), sale.gst.igstAmount)
+      .input('patientId', sql.Int, sale.patientId)
+      .input('prescriptionId', sql.Int, sale.prescriptionId)
+      .input('doctorId', sql.Int, sale.doctorId)
+      .input('payMode', sql.NVarChar(20), sale.payMode)
+      .input('payRef', sql.NVarChar(50), sale.payReference)
+      .input('paid', sql.Decimal(12, 2), sale.paid)
+      .input('due', sql.Decimal(12, 2), sale.due);
+    // The patient this sale had before an edit, to re-check their credit too.
+    const before = saleId ? (await new sql.Request(tx).input('bid', sql.Int, saleId).query('SELECT PatientId FROM SalesBilling WHERE SalesBillingId = @bid')).recordset[0]?.PatientId : null;
     let id = saleId;
     if (saleId) {
       const upd = await head.input('id', sql.Int, saleId).query(`
         UPDATE SalesBilling SET TransDate = @transDate, CustomerName = @customer, MobileNo = @mobile, TotalAmount = @total,
             SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt, RoundOff = @roundOff,
-            TaxableAmount = @taxable, CGSTAmount = @cgst, SGSTAmount = @sgst, IGSTAmount = @igst
+            TaxableAmount = @taxable, CGSTAmount = @cgst, SGSTAmount = @sgst, IGSTAmount = @igst,
+            PatientId = @patientId, PrescriptionId = @prescriptionId, DoctorId = @doctorId,
+            PayMode = @payMode, PayReference = @payRef, PaidAmount = @paid, DueAmount = @due
         WHERE SalesBillingId = @id AND IsActive = 1`);
       if (!upd.rowsAffected[0]) {
         await tx.rollback();
@@ -262,12 +375,19 @@ async function saveSale(req, res, saleId) {
     } else {
       const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null).query(`
         INSERT INTO SalesBilling (TransDate, CustomerName, MobileNo, TotalAmount, SubTotal, DiscPercent, DiscountAmount, RoundOff, CreatedBy,
-                                  TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount)
+                                  TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount,
+                                  PatientId, PrescriptionId, DoctorId, PayMode, PayReference, PaidAmount, DueAmount)
         OUTPUT INSERTED.SalesBillingId
-        VALUES (@transDate, @customer, @mobile, @total, @subTotal, @disc, @discAmt, @roundOff, @by, @taxable, @cgst, @sgst, @igst)`);
+        VALUES (@transDate, @customer, @mobile, @total, @subTotal, @disc, @discAmt, @roundOff, @by, @taxable, @cgst, @sgst, @igst,
+                @patientId, @prescriptionId, @doctorId, @payMode, @payRef, @paid, @due)`);
       id = ins.recordset[0].SalesBillingId;
     }
     await insertLines(tx, id, sale.lines);
+    const credit = await negativeBalance(tx, [before, sale.patientId]);
+    if (credit) {
+      await tx.rollback();
+      return res.status(400).json({ error: credit });
+    }
     await tx.commit();
     res.status(saleId ? 200 : 201).json({ SalesBillingId: id, Code: docNo('S', id), TotalAmount: sale.total });
   } catch (err) {
@@ -290,8 +410,20 @@ router.delete('/:id', async (req, res) => {
     const pool = await getPool();
     const locked = await returnedReason(pool.request(), Number(req.params.id));
     if (locked) return res.status(400).json({ error: locked });
-    await pool.request().input('id', sql.Int, req.params.id)
-      .query('UPDATE SalesBilling SET IsActive = 0 WHERE SalesBillingId = @id');
+    // A credit sale can't go while payments received against it would then be
+    // more than the patient owes.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const del = await new sql.Request(tx).input('id', sql.Int, req.params.id)
+        .query('UPDATE SalesBilling SET IsActive = 0 OUTPUT INSERTED.PatientId WHERE SalesBillingId = @id');
+      const credit = await negativeBalance(tx, [del.recordset[0]?.PatientId]);
+      if (credit) { await tx.rollback(); return res.status(400).json({ error: credit }); }
+      await tx.commit();
+    } catch (e) {
+      await tx.rollback().catch(() => {});
+      throw e;
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

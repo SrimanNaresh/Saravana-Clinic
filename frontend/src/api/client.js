@@ -251,6 +251,9 @@ export const pharmacyReportApi = {
 export const salesBillingApi = {
   ...transactionApi('sales-billings'),
   get: (id) => api.get(`/sales-billings/${id}`).then((r) => r.data),
+  lookupPatients: (search = '') => api.get('/sales-billings/lookup/patients', { params: { search } }).then((r) => r.data),
+  lookupPrescriptions: (patientId) => api.get(`/sales-billings/lookup/prescriptions/${patientId}`).then((r) => r.data),
+  lookupDoctors: () => api.get('/sales-billings/lookup/doctors').then((r) => r.data),
   // An item's batches with stock left; excludeSaleId adds back that sale's own quantities.
   batches: (itemId, excludeSaleId) => api.get(`/sales-billings/batches/${itemId}`, { params: { excludeSaleId } }).then((r) => r.data),
 };
