@@ -79,6 +79,7 @@ export const MENU_GROUPS = [
         submenu: [
           { key: 'pharmacy.sales-billing', label: 'Master', to: '/pharmacy/sales-billing' },
           { key: 'pharmacy.sales-billing-list', label: 'List', to: '/pharmacy/sales-billing-list' },
+          { key: 'pharmacy.credit-ledger', label: 'Credit Ledger', to: '/pharmacy/credit-ledger' },
         ],
       },
       {

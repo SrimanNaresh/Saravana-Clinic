@@ -21,7 +21,7 @@ export default function SalesReturnList() {
   const isAdmin = user?.role === 'Admin';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => location.state?.search || '');
 
   useEffect(() => {
     if (location.state?.flash) {

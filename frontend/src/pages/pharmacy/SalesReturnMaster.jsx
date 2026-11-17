@@ -32,6 +32,7 @@ export default function SalesReturnMaster() {
   const [saleId, setSaleId] = useState('');
   const [sale, setSale] = useState(null); // head of the picked sale
   const [returnDate, setReturnDate] = useState(today());
+  const [refundMode, setRefundMode] = useState('Cash'); // Cash back, or Credit (lowers the patient's due)
   const [rows, setRows] = useState([]);
   const [editing, setEditing] = useState(null); // { id, no }
   const [saving, setSaving] = useState(false);
@@ -62,7 +63,7 @@ export default function SalesReturnMaster() {
     } catch { show('Failed to load the sale', 'error'); }
   };
 
-  const clearSale = () => { setSaleId(''); setSale(null); setRows([]); };
+  const clearSale = () => { setSaleId(''); setSale(null); setRows([]); setRefundMode('Cash'); };
   const pickFindBy = (mode) => {
     setFindBy(mode);
     clearSale();
@@ -89,6 +90,7 @@ export default function SalesReturnMaster() {
     navigate(location.pathname, { replace: true, state: null });
     salesReturnApi.get(id).then(async (r) => {
       setEditing({ id: r.SalesReturnId, no: r.ReturnNo });
+      setRefundMode(r.RefundMode || 'Cash');
       setFindBy('date');
       const d = String(r.SaleDate).slice(0, 10);
       setSaleDate(d);
@@ -128,7 +130,7 @@ export default function SalesReturnMaster() {
     if (problems.some(Boolean)) return show('Fix the boxes marked in red first', 'error');
     setSaving(true);
     try {
-      const body = { salesBillingId: Number(saleId), returnDate, lines: rows.map((r) => ({ salesLineId: r.SalesLineId, quantity: r.qty })) };
+      const body = { salesBillingId: Number(saleId), returnDate, refundMode, lines: rows.map((r) => ({ salesLineId: r.SalesLineId, quantity: r.qty })) };
       if (editing) {
         await salesReturnApi.update(editing.id, body);
         navigate('/pharmacy/sales-return-list', { state: { flash: `${editing.no} updated` } });
@@ -265,7 +267,18 @@ export default function SalesReturnMaster() {
                   </tr>
                 )}
                 <tr className="bg-brand-50 font-bold text-brand-800">
-                  <td className="text-right" colSpan={9}>Refund Amount</td>
+                  <td className="text-right" colSpan={9}>
+                    {sale?.PatientId ? (
+                      <span className="mr-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-ink-600" title="Cash: money back. Adjust in credit: lowers what the patient owes.">
+                        Refund
+                        <select className="h-6 rounded border border-ink-200 bg-white px-1.5 py-0 text-[13px] focus:border-brand-400 focus:outline-none" value={refundMode} onChange={(e) => setRefundMode(e.target.value)}>
+                          <option value="Cash">Cash</option>
+                          <option value="Credit">Adjust in credit</option>
+                        </select>
+                      </span>
+                    ) : null}
+                    Refund Amount
+                  </td>
                   <td className="ph-num">{money(bill.total)}</td>
                 </tr>
               </tfoot>

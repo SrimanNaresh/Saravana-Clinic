@@ -3,6 +3,7 @@ import { getPool, sql } from '../db/pool.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
 import { saleLineAmount, saleBill, saleGst } from '../utils/purchaseCalc.js';
 import { batchStock } from '../utils/batchStock.js';
+import { negativeBalance } from '../utils/patientCredit.js';
 
 // Pharmacy > Return > Sales Return: goods a customer brings back from one
 // sale, found by the Sales Date or by the customer. Saving puts the returned
@@ -82,7 +83,8 @@ async function saleLines(request, saleId, excludeReturnId) {
 
 async function saleHead(request, saleId) {
   const r = await request.input('headId', sql.Int, saleId).query(`
-    SELECT sb.SalesBillingId, ${S_NO} AS SaleNo, sb.TransDate, sb.CustomerName, sb.MobileNo, ISNULL(sb.DiscPercent, 0) AS DiscPercent
+    SELECT sb.SalesBillingId, ${S_NO} AS SaleNo, sb.TransDate, sb.CustomerName, sb.MobileNo, ISNULL(sb.DiscPercent, 0) AS DiscPercent,
+           sb.PatientId, sb.DueAmount, sb.PayMode
     FROM SalesBilling sb WHERE sb.SalesBillingId = @headId AND sb.IsActive = 1`);
   return r.recordset[0] || null;
 }
@@ -105,7 +107,7 @@ router.get('/', async (req, res) => {
     const pool = await getPool();
     const r = await pool.request().input('search', sql.NVarChar, `%${search}%`).query(`
       SELECT h.SalesReturnId, ${SR_NO} AS ReturnNo, h.TransDate AS ReturnDate, h.CustomerName, h.MobileNo,
-             h.SalesBillingId, ${S_NO} AS SaleNo, sb.TransDate AS SaleDate, h.TotalAmount, li.ItemNames, li.Items, li.TotalQty
+             h.SalesBillingId, ${S_NO} AS SaleNo, sb.TransDate AS SaleDate, h.TotalAmount, h.RefundMode, li.ItemNames, li.Items, li.TotalQty
       FROM SalesReturn h
       JOIN SalesBilling sb ON sb.SalesBillingId = h.SalesBillingId
       OUTER APPLY (
@@ -127,7 +129,7 @@ router.get('/:id', async (req, res) => {
     const pool = await getPool();
     const head = await pool.request().input('id', sql.Int, req.params.id).query(`
       SELECT h.SalesReturnId, ${SR_NO} AS ReturnNo, h.TransDate AS ReturnDate, h.SalesBillingId, ${S_NO} AS SaleNo,
-             sb.TransDate AS SaleDate, h.CustomerName, h.MobileNo, h.TotalAmount
+             sb.TransDate AS SaleDate, h.CustomerName, h.MobileNo, h.TotalAmount, h.RefundMode
       FROM SalesReturn h JOIN SalesBilling sb ON sb.SalesBillingId = h.SalesBillingId
       WHERE h.SalesReturnId = @id AND h.IsActive = 1`);
     if (!head.recordset.length) return res.status(404).json({ error: 'Sales Return not found' });
@@ -188,7 +190,11 @@ export async function checkReturn(tx, body, returnId) {
   const recorded = lines.filter((l) => l.gstPercent != null);
   const sum = (k) => (recorded.length ? round2(recorded.reduce((t, l) => t + l[k], 0)) : null);
   const gst = { taxableAmount: sum('taxableAmount'), cgstAmount: sum('cgstAmount'), sgstAmount: sum('sgstAmount'), igstAmount: recorded.length ? 0 : null };
-  return { returnDate, sale, lines, discPercent, ...saleBill(lines.map((l) => l.amount), discPercent), gst };
+  // Refund: Cash (money back) or Credit (lowers the patient's credit due;
+  // only for a sale made to a registered patient).
+  const refundMode = body.refundMode === 'Credit' ? 'Credit' : 'Cash';
+  if (refundMode === 'Credit' && !sale.PatientId) return { error: 'Adjust in credit is only for a sale made to a registered patient' };
+  return { returnDate, sale, lines, discPercent, ...saleBill(lines.map((l) => l.amount), discPercent), gst, refundMode };
 }
 
 async function saveReturn(req, res, returnId) {
@@ -205,22 +211,23 @@ async function saveReturn(req, res, returnId) {
       .input('subTotal', sql.Decimal(12, 2), r.subTotal).input('disc', sql.Decimal(5, 2), r.discPercent)
       .input('discAmt', sql.Decimal(12, 2), r.discountAmount).input('total', sql.Decimal(12, 2), r.total)
       .input('taxable', sql.Decimal(12, 2), r.gst.taxableAmount).input('cgst', sql.Decimal(12, 2), r.gst.cgstAmount)
-      .input('sgst', sql.Decimal(12, 2), r.gst.sgstAmount).input('igst', sql.Decimal(12, 2), r.gst.igstAmount);
+      .input('sgst', sql.Decimal(12, 2), r.gst.sgstAmount).input('igst', sql.Decimal(12, 2), r.gst.igstAmount)
+      .input('refund', sql.NVarChar(20), r.refundMode);
     let id = returnId;
     const before = returnId ? await linesOf(tx, returnId) : [];
     if (returnId) {
       const upd = await head.input('id', sql.Int, returnId).query(`
         UPDATE SalesReturn SET TransDate = @date, SalesBillingId = @saleId, CustomerName = @customer, MobileNo = @mobile,
             SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt, TotalAmount = @total,
-            TaxableAmount = @taxable, CGSTAmount = @cgst, SGSTAmount = @sgst, IGSTAmount = @igst
+            TaxableAmount = @taxable, CGSTAmount = @cgst, SGSTAmount = @sgst, IGSTAmount = @igst, RefundMode = @refund
         WHERE SalesReturnId = @id AND IsActive = 1`);
       if (!upd.rowsAffected[0]) { await tx.rollback(); return res.status(404).json({ error: 'Sales Return not found' }); }
       await new sql.Request(tx).input('id', sql.Int, returnId).query('DELETE FROM SalesReturnItem WHERE SalesReturnId = @id');
     } else {
       const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null).query(`
         INSERT INTO SalesReturn (TransDate, SalesBillingId, CustomerName, MobileNo, SubTotal, DiscPercent, DiscountAmount, TotalAmount, CreatedBy,
-                                 TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount)
-        OUTPUT INSERTED.SalesReturnId VALUES (@date, @saleId, @customer, @mobile, @subTotal, @disc, @discAmt, @total, @by, @taxable, @cgst, @sgst, @igst)`);
+                                 TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount, RefundMode)
+        OUTPUT INSERTED.SalesReturnId VALUES (@date, @saleId, @customer, @mobile, @subTotal, @disc, @discAmt, @total, @by, @taxable, @cgst, @sgst, @igst, @refund)`);
       id = ins.recordset[0].SalesReturnId;
     }
     for (const l of r.lines) {
@@ -240,6 +247,9 @@ async function saveReturn(req, res, returnId) {
     }
     const short = before.length ? await shortBatch(tx, before) : null;
     if (short) { await tx.rollback(); return res.status(400).json({ error: short }); }
+    // A credit refund can't take the patient's balance below zero.
+    const credit = await negativeBalance(tx, [r.sale.PatientId]);
+    if (credit) { await tx.rollback(); return res.status(400).json({ error: credit.replace('This change', 'This return') }); }
     await tx.commit();
     res.status(returnId ? 200 : 201).json({ SalesReturnId: id, ReturnNo: docNo('SR', id), TotalAmount: r.total });
   } catch (err) {

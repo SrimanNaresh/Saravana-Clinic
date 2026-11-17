@@ -23,7 +23,7 @@ export default function SalesBillingList() {
   const isAdmin = user?.role === 'Admin';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => location.state?.search || '');
   const [clinic, setClinic] = useState(null);
   const [printBill, setPrintBill] = useState(null);
   const [printFormat, setPrintFormat] = usePrintFormat();
@@ -135,7 +135,10 @@ export default function SalesBillingList() {
                     <td className="ph-mid">{r.MobileNo || '-'}</td>
                     <td className="truncate text-ink-500" title={r.ItemNames || ''}>{r.ItemNames || '-'}</td>
                     <td className="ph-num">{Number(r.TotalQty)}</td>
-                    <td className="ph-num font-medium text-ink-800">{money(r.TotalAmount)}</td>
+                    <td className="ph-num font-medium text-ink-800" title={Number(r.DueAmount) > 0 ? `${r.PayMode}: due ₹${money(r.DueAmount)}` : r.PayMode || ''}>
+                      {money(r.TotalAmount)}
+                      {Number(r.DueAmount) > 0 && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">Due {money(r.DueAmount)}</span>}
+                    </td>
                     <td>
                       <div className="flex justify-center gap-0.5">
                         <button type="button" className="ph-icon" title="Print bill" onClick={() => print(r)}><Printer size={14} /></button>
