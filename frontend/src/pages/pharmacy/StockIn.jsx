@@ -225,19 +225,21 @@ export default function StockIn() {
   };
 
   const locked = editing?.locked;
-  const cell = 'border border-ink-200 px-1 py-0.5 break-words';
+  // Shared Pharmacy grid look (index.css .ph-table / .ph-box). This grid has the
+  // most columns, so its text stays a size smaller to fit 1280px.
+  const cell = 'break-words';
   // Headings: one line, aligned like their column's values. Headings with an
   // arrow keep room on the left for it, so the label still lines up with the
   // numbers on the right.
-  const hd = 'relative border border-ink-200 px-1 py-2 align-middle text-[10px] whitespace-nowrap xl:text-[11px]';
-  const hdArrow = 'relative border border-ink-200 py-2 pl-[20px] pr-1 align-middle text-[10px] whitespace-nowrap xl:text-[11px]';
+  const hd = 'relative px-1 text-[10px] xl:text-[11px]';
+  const hdArrow = 'relative pl-[20px] pr-1 text-[10px] xl:text-[11px]';
   // Each column's alignment, used by its heading and its cells alike: text to
   // the left, short codes and dates centred, numbers to the right.
   const AL = { item: 'text-left', batch: 'text-left', chk: 'text-center', pack: 'text-center', unit: 'text-center', month: 'text-center' };
-  const al = (key) => AL[key] || 'text-right';
-  const box = 'w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] focus:border-brand-400 focus:bg-white focus:outline-none';
+  const al = (key) => AL[key] || 'ph-num';
+  const box = 'ph-box text-[12px]';
   const bad = 'border-red-400 bg-red-50 text-red-700';
-  const ro = 'px-1 text-right text-ink-600';
+  const ro = 'ph-num px-1 text-ink-600';
   // The order line's figures for what's being received now: R.Order units at
   // the order's rate (free units aren't charged).
   const orderCalc = (r) => purchaseLine({ pRate: r.PRate, discPercent: r.DiscPercent, quantity: r.qty, cgstPercent: r.CGSTPercent, sgstPercent: r.SGSTPercent });
@@ -306,12 +308,12 @@ export default function StockIn() {
             </div>
           )}
 
-          <div className="mt-2 overflow-x-auto">
+          <div className="ph-wrap mt-2">
             {/* Fixed layout: each column has a share of the width, so either view fits the screen. */}
             {/* Too many columns to squeeze below ~1280px: from there down it scrolls sideways. */}
-            <table className="w-full table-fixed border-collapse text-left text-[12px]" style={{ minWidth: 1170 }} {...gridKeys}>
+            <table className="ph-table text-[12px]" style={{ minWidth: 1170 }} {...gridKeys}>
               <thead>
-                <tr className="bg-brand-50 font-bold leading-tight text-brand-700">
+                <tr>
                   <th className={`${hd} ${al('chk')}`} style={w('chk')}><input type="checkbox" checked={allTicked} onChange={tickAll} disabled={!rows.length} title="Tick all" /></th>
                   <th className={`${hd} ${al('item')}`} style={w('item')}>Item Name</th>
                   <th className={`${hd} ${al('pack')}`} style={w('pack')}>Pack</th>
@@ -414,9 +416,9 @@ export default function StockIn() {
                       <td className={`${cell} !px-0`}><MonthBox data-r={i} data-c={4} className={`${box} text-center ${p.mfg ? bad : ''}`} value={r.mfg} onChange={(v) => setRow(i, { mfg: v })} /></td>
                       <td className={`${cell} !px-0`}><MonthBox data-r={i} data-c={5} className={`${box} text-center ${p.exp ? bad : ''}`} value={r.exp} onChange={(v) => setRow(i, { exp: v })} /></td>
                       <td className={`${cell} !px-0`}><input type="number" min="0" max="100" step="0.01" data-r={i} data-c={6} className={`${box} no-spin text-right ${p.disc ? bad : ''}`} value={r.disc} onChange={(e) => setRow(i, { disc: e.target.value })} /></td>
-                      <td className={`${cell} px-1 text-right font-semibold text-ink-800`}>{money(sel)}</td>
+                      <td className={`${cell} ph-num px-1 font-semibold text-ink-800`}>{money(sel)}</td>
                       {showUnit && (
-                        <td className={`${cell} px-1 text-right ${GROUP.sel.cell}`} title={`${money(sel)} ÷ ${n} units`}>
+                        <td className={`${cell} ph-num px-1 ${GROUP.sel.cell}`} title={`${money(sel)} ÷ ${n} units`}>
                           <span className="font-semibold">{money(round2(sel / n))}</span>
                           <p className="text-[11px] text-emerald-700/70">÷ {n}</p>
                         </td>
@@ -427,9 +429,9 @@ export default function StockIn() {
               </tbody>
               {rows.length > 0 && (
                 <tfoot>
-                  <tr className="bg-ink-50 font-semibold">
-                    <td className={`${cell} px-2 text-right`} colSpan={7 + extraCols}>Sum of Total</td>
-                    <td className={`${cell} px-1 text-right text-ink-900`}>{money(orderTotal)}</td>
+                  <tr>
+                    <td className="px-2 text-right" colSpan={7 + extraCols}>Sum of Total</td>
+                    <td className="ph-num px-1 text-ink-900">{money(orderTotal)}</td>
                     <td className={cell} colSpan={10 + (showUnit ? 1 : 0)} />
                   </tr>
                 </tfoot>

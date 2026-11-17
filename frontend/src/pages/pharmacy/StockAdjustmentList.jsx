@@ -67,37 +67,38 @@ export default function StockAdjustmentList() {
           }
         />
         {loading ? <Spinner /> : rows.length === 0 ? <EmptyState message="No adjustments found." /> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="ph-wrap">
+            <table className="ph-table min-w-[950px]">
+              <colgroup><col className="w-[9%]" /><col className="w-[8%]" /><col className="w-[24%]" /><col className="w-[17%]" /><col className="w-[7%]" /><col className="w-[8%]" /><col className="w-[7%]" /><col className="w-[8%]" /><col className="w-[12%]" /></colgroup>
               <thead>
-                <tr className="table-head">
-                  <th className="rounded-l-lg px-3 py-2">Adj No</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Item Name</th>
-                  <th className="px-3 py-2">Remarks</th>
-                  <th className="px-3 py-2 text-right">In Qty</th>
-                  <th className="px-3 py-2 text-right">In Value</th>
-                  <th className="px-3 py-2 text-right">Out Qty</th>
-                  <th className="px-3 py-2 text-right">Out Value</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
+                <tr>
+                  <th className="ph-mid">Adj No</th>
+                  <th className="ph-mid">Date</th>
+                  <th>Item Name</th>
+                  <th>Remarks</th>
+                  <th className="ph-num">In Qty</th>
+                  <th className="ph-num">In Value</th>
+                  <th className="ph-num">Out Qty</th>
+                  <th className="ph-num">Out Value</th>
+                  <th className="ph-mid">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.AdjustmentId} className="table-row">
-                    <td className="px-3 py-1.5 font-medium text-brand-700">{r.AdjNo}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{dateLabel(r.AdjDate)}</td>
-                    <td className="max-w-xs truncate px-3 py-1.5 text-slate-600" title={r.ItemNames}>{r.ItemNames}</td>
-                    <td className="max-w-[12rem] truncate px-3 py-1.5 text-slate-500" title={r.Remarks || ''}>{r.Remarks || '-'}</td>
-                    <td className="px-3 py-1.5 text-right text-emerald-700">{Number(r.InQty) || '-'}</td>
-                    <td className="px-3 py-1.5 text-right text-emerald-700">{Number(r.InTotal) ? money(r.InTotal) : '-'}</td>
-                    <td className="px-3 py-1.5 text-right text-red-600">{Number(r.OutQty) || '-'}</td>
-                    <td className="px-3 py-1.5 text-right text-red-600">{Number(r.OutTotal) ? money(r.OutTotal) : '-'}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex justify-end gap-1">
-                        <button type="button" className="btn-ghost px-2 py-1" title="Edit adjustment" onClick={() => navigate('/pharmacy/stock-adjustment', { state: { editAdjustmentId: r.AdjustmentId } })}><Pencil size={15} /></button>
+                  <tr key={r.AdjustmentId}>
+                    <td className="font-medium text-brand-700 ph-mid">{r.AdjNo}</td>
+                    <td className="text-ink-500 ph-mid">{dateLabel(r.AdjDate)}</td>
+                    <td className="truncate text-ink-600" title={r.ItemNames}>{r.ItemNames}</td>
+                    <td className="truncate text-ink-500" title={r.Remarks || ''}>{r.Remarks || '-'}</td>
+                    <td className="ph-num text-emerald-700">{Number(r.InQty) || '-'}</td>
+                    <td className="ph-num text-emerald-700">{Number(r.InTotal) ? money(r.InTotal) : '-'}</td>
+                    <td className="ph-num text-red-600">{Number(r.OutQty) || '-'}</td>
+                    <td className="ph-num text-red-600">{Number(r.OutTotal) ? money(r.OutTotal) : '-'}</td>
+                    <td>
+                      <div className="flex justify-center gap-0.5">
+                        <button type="button" className="ph-icon" title="Edit adjustment" onClick={() => navigate('/pharmacy/stock-adjustment', { state: { editAdjustmentId: r.AdjustmentId } })}><Pencil size={14} /></button>
                         {isAdmin && (
-                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete adjustment (Admin only)" onClick={() => remove(r)}><Trash2 size={15} /></button>
+                          <button type="button" className="ph-icon-del" title="Delete adjustment (Admin only)" onClick={() => remove(r)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>

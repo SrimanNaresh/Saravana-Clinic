@@ -79,31 +79,32 @@ export default function PurchaseOrderList() {
         ) : rows.length === 0 ? (
           <EmptyState message="No orders found." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="ph-wrap">
+            <table className="ph-table min-w-[700px]">
+              <colgroup><col className="w-[13%]" /><col className="w-[11%]" /><col className="w-[40%]" /><col className="w-[9%]" /><col className="w-[15%]" /><col className="w-[12%]" /></colgroup>
               <thead>
-                <tr className="table-head">
-                  <th className="rounded-l-lg px-3 py-2">Order No</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Vendor</th>
-                  <th className="px-3 py-2 text-right">Items</th>
-                  <th className="px-3 py-2 text-right">Sum of Total</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
+                <tr>
+                  <th className="ph-mid">Order No</th>
+                  <th className="ph-mid">Date</th>
+                  <th>Vendor</th>
+                  <th className="ph-num">Items</th>
+                  <th className="ph-num">Sum of Total</th>
+                  <th className="ph-mid">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.PurchaseOrderId} className="table-row">
-                    <td className="px-3 py-1.5 font-medium text-brand-700">{r.OrderNo}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{dateLabel(r.OrderDate)}</td>
-                    <td className="px-3 py-1.5 text-slate-700">{r.VendorName}</td>
-                    <td className="px-3 py-1.5 text-right text-slate-600">{r.Items}</td>
-                    <td className="px-3 py-1.5 text-right font-semibold text-slate-800">{money(r.TotalAmount)}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex justify-end gap-1">
-                        <button type="button" className="btn-ghost px-2 py-1" title="Edit order" onClick={() => navigate('/pharmacy/purchase-order', { state: { editOrderId: r.PurchaseOrderId } })}><Pencil size={15} /></button>
+                  <tr key={r.PurchaseOrderId}>
+                    <td className="font-medium text-brand-700 ph-mid">{r.OrderNo}</td>
+                    <td className="text-ink-500 ph-mid">{dateLabel(r.OrderDate)}</td>
+                    <td className="text-ink-700 truncate">{r.VendorName}</td>
+                    <td className="ph-num text-ink-600">{r.Items}</td>
+                    <td className="ph-num font-semibold text-ink-800">{money(r.TotalAmount)}</td>
+                    <td>
+                      <div className="flex justify-center gap-0.5">
+                        <button type="button" className="ph-icon" title="Edit order" onClick={() => navigate('/pharmacy/purchase-order', { state: { editOrderId: r.PurchaseOrderId } })}><Pencil size={14} /></button>
                         {isAdmin && (
-                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete order (Admin only)" onClick={() => remove(r)}><Trash2 size={15} /></button>
+                          <button type="button" className="ph-icon-del" title="Delete order (Admin only)" onClick={() => remove(r)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>

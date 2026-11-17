@@ -275,12 +275,13 @@ export default function PurchaseOrder() {
     }
   };
 
-  const cell = 'border border-ink-200 px-1 py-0.5 break-words';
+  // Shared Pharmacy grid look (index.css .ph-table / .ph-box), a size smaller to fit 1280px.
+  const cell = 'break-words';
   // Headings centred both ways (Item Name stays left); one line on wide
   // screens, smaller and allowed to wrap on narrower ones.
-  const hd = 'border border-ink-200 px-0.5 py-1.5 text-center align-middle text-[10px] xl:text-[11px] xl:whitespace-nowrap';
-  const box = 'w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-[12px] focus:border-brand-400 focus:bg-white focus:outline-none';
-  const numBox = `${box} no-spin text-right`;
+  const hd = 'px-0.5 text-center text-[10px] whitespace-normal xl:text-[11px] xl:whitespace-nowrap';
+  const box = 'ph-box text-[12px]';
+  const numBox = `${box} no-spin text-right tabular-nums`;
   const opt = 'bg-amber-50 text-amber-900';
   // The › arrow swaps the four GST columns for the three item-detail columns.
   const optCols = showOptional ? 3 - 4 : 0;
@@ -393,12 +394,12 @@ export default function PurchaseOrder() {
             </div>
           )}
 
-          <div className="mt-2 overflow-x-auto">
+          <div className="ph-wrap mt-2">
             {/* Fixed layout: each column has a share of the width, so the table fits the
                 screen without scrolling; opening the optional columns lets it scroll. */}
-            <table className={`w-full table-fixed border-collapse text-left text-[12px] `} {...gridKeys}>
+            <table className="ph-table text-[12px]" {...gridKeys}>
               <thead>
-                <tr className="bg-brand-50 text-[11px] font-bold leading-tight text-brand-700">
+                <tr>
                   <th className={`${hd} w-[2.5%]`}>#</th>
                   <th className={`${hd} w-[17%] !text-left`}>
                     <div className="flex items-center justify-between">
@@ -409,25 +410,25 @@ export default function PurchaseOrder() {
                     </div>
                   </th>
                   {showOptional && [['Generic', 'w-[6%]'], ['Manufacturer', 'w-[7.5%]'], ['HSN', 'w-[4%]']].map(([h, w]) => <th key={h} className={`${hd} ${w} ${opt}`}>{h}</th>)}
-                  <th className={`${hd} w-[7%]`} title="Category from Item Master">Category</th>
+                  <th className={`${hd} w-[7%] !text-left`} title="Category from Item Master">Category</th>
                   <th className={`${hd} w-[4.5%]`}>Pack</th>
                   <th className={`${hd} w-[4.5%]`} title="Type / Unit from Item Master">Unit</th>
-                  <th className={`${hd} w-[5.5%]`}>MRP</th>
-                  <th className={`${hd} w-[5.5%]`} title="Last rate from this vendor, after its discount (P.Rate less Disc %); 0 if never ordered from them">Old Price</th>
-                  <th className={`${hd} w-[5.5%]`} title="Purchase rate — Disc % applies to it">P.Rate</th>
-                  <th className={`${hd} w-[4%]`} title="Free units — not charged, received with the rest">Free</th>
-                  <th className={`${hd} w-[4%]`}>Disc%</th>
-                  <th className={`${hd} w-[5%]`}>Qty</th>
-                  <th className={`${hd} w-[6%]`}>Amount</th>
+                  <th className={`${hd} w-[5.5%] !text-right`}>MRP</th>
+                  <th className={`${hd} w-[5.5%] !text-right`} title="Last rate from this vendor, after its discount (P.Rate less Disc %); 0 if never ordered from them">Old Price</th>
+                  <th className={`${hd} w-[5.5%] !text-right`} title="Purchase rate — Disc % applies to it">P.Rate</th>
+                  <th className={`${hd} w-[4%] !text-right`} title="Free units — not charged, received with the rest">Free</th>
+                  <th className={`${hd} w-[4%] !text-right`}>Disc%</th>
+                  <th className={`${hd} w-[5%] !text-right`}>Qty</th>
+                  <th className={`${hd} w-[6%] !text-right`}>Amount</th>
                   {!showOptional && (
                     <>
-                      <th className={`${hd} w-[4%]`}>GST%</th>
-                      <th className={`${hd} w-[4.5%]`}>CGST%</th>
-                      <th className={`${hd} w-[4.5%]`}>SGST%</th>
-                      <th className={`${hd} w-[5.5%]`}>GST Amt</th>
+                      <th className={`${hd} w-[4%] !text-right`}>GST%</th>
+                      <th className={`${hd} w-[4.5%] !text-right`}>CGST%</th>
+                      <th className={`${hd} w-[4.5%] !text-right`}>SGST%</th>
+                      <th className={`${hd} w-[5.5%] !text-right`}>GST Amt</th>
                     </>
                   )}
-                  <th className={`${hd} w-[6.5%]`}>Total</th>
+                  <th className={`${hd} w-[6.5%] !text-right`}>Total</th>
                   <th className={`${hd} w-[4%]`} />
                 </tr>
               </thead>
@@ -435,7 +436,7 @@ export default function PurchaseOrder() {
                 {lines.map((l, r) => {
                   const c = calcOf(l);
                   const bad = problems.get(l.key);
-                  const ro = 'px-1.5 text-right text-ink-600';
+                  const ro = 'ph-num px-1.5 text-ink-600';
                   return (
                     <tr key={l.key} className={bad ? 'bg-red-50' : ''} title={bad || ''}>
                       <td className={`${cell} text-center text-ink-400`}>{r + 1}</td>
@@ -445,8 +446,8 @@ export default function PurchaseOrder() {
                       </td>
                       {showOptional && [l.generic, l.manufacturer, l.hsn].map((v, i) => <td key={i} className={`${cell} ${opt} px-1.5`}>{v}</td>)}
                       <td className={`${cell} px-1.5`}>{l.category}</td>
-                      <td className={`${cell} px-1.5`}>{l.pack}</td>
-                      <td className={`${cell} px-1.5`}>{l.unit}</td>
+                      <td className={`${cell} ph-mid px-1.5`}>{l.pack}</td>
+                      <td className={`${cell} ph-mid px-1.5`}>{l.unit}</td>
                       <td className={cell}><input type="number" min="0" step="0.01" data-r={r} data-c={1} className={numBox} value={l.mrp} disabled={!l.itemId} onChange={(e) => setLine(l.key, { mrp: e.target.value })} /></td>
                       <td className={`${cell} ${ro}`}>{l.itemId ? money(lastRates[l.itemId] ?? 0) : ''}</td>
                       <td className={cell}><input type="number" min="0" step="0.01" data-r={r} data-c={2} className={`${numBox} ${Number(l.pRate) > Number(l.mrp) ? 'border-red-400 bg-red-50 text-red-700' : ''}`} value={l.pRate} disabled={!l.itemId} onChange={(e) => setLine(l.key, { pRate: e.target.value })} /></td>
@@ -465,8 +466,8 @@ export default function PurchaseOrder() {
                       <td className={`${cell} ${ro} font-semibold text-ink-800`}>{l.itemId ? money(c.total) : ''}</td>
                       <td className={cell}>
                         <div className="flex justify-center">
-                          <button type="button" className="rounded p-0.5 text-brand-600 hover:bg-brand-50" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={13} /></button>
-                          <button type="button" className="rounded p-0.5 text-red-500 hover:bg-red-50" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={13} /></button>
+                          <button type="button" className="ph-icon text-brand-600" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={13} /></button>
+                          <button type="button" className="ph-icon-del" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -476,7 +477,7 @@ export default function PurchaseOrder() {
               <tfoot>
                 <tr className="bg-ink-50 font-semibold">
                   <td className={`${cell} px-2 text-right`} colSpan={16 + optCols}>Sum of Total</td>
-                  <td className={`${cell} px-1.5 text-right text-ink-900`}>{money(total)}</td>
+                  <td className={`${cell} ph-num px-1.5 text-ink-900`}>{money(total)}</td>
                   <td className={cell} />
                 </tr>
                 <tr className="bg-ink-50">
@@ -485,14 +486,14 @@ export default function PurchaseOrder() {
                       <input type="checkbox" checked={roundOn} onChange={(e) => setRoundOn(e.target.checked)} /> Round Off
                     </label>
                   </td>
-                  <td className={`${cell} px-1.5 text-right tabular-nums ${roundOff < 0 ? 'text-red-600' : 'text-ink-700'}`}>
+                  <td className={`${cell} ph-num px-1.5 ${roundOff < 0 ? 'text-red-600' : 'text-ink-700'}`}>
                     {roundOff > 0 ? '+' : ''}{money(roundOff)}
                   </td>
                   <td className={cell} />
                 </tr>
                 <tr className="bg-brand-50 font-bold">
                   <td className={`${cell} px-2 text-right text-brand-800`} colSpan={16 + optCols}>Net Amount</td>
-                  <td className={`${cell} px-1.5 text-right text-[13px] text-brand-800`}>{money(netAmount)}</td>
+                  <td className={`${cell} ph-num px-1.5 text-[13px] text-brand-800`}>{money(netAmount)}</td>
                   <td className={cell} />
                 </tr>
               </tfoot>

@@ -119,9 +119,10 @@ export default function VendorPaymentEntry() {
     }
   };
 
-  const th = 'border border-ink-200 px-1.5 py-1 text-center text-[11px] font-semibold whitespace-nowrap';
-  const td = 'border border-ink-200 px-1.5 py-0.5';
-  const tdNum = `${td} text-right tabular-nums`;
+  // Shared Pharmacy table look (index.css .ph-table).
+  const th = 'ph-mid';
+  const thNum = 'ph-num';
+  const tdNum = 'ph-num';
   const sumRow = (label, value, cls = '') => (
     <div className={`flex items-center justify-between gap-4 px-3 py-1.5 ${cls}`}><span className="whitespace-nowrap">{label}</span><span className="whitespace-nowrap tabular-nums">{value}</span></div>
   );
@@ -182,31 +183,32 @@ export default function VendorPaymentEntry() {
               </span>
             </div>
 
-            <div className="mt-2 overflow-x-auto">
-              <table className="w-full min-w-[900px] border-collapse text-[12px]">
-                <thead className="bg-brand-50 text-brand-800">
+            <div className="ph-wrap mt-2">
+              <table className="ph-table min-w-[900px]">
+                <colgroup><col className="w-[3%]" /><col className="w-[26%]" /><col className="w-[10%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[5%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[8%]" /><col className="w-[5%]" /><col className="w-[7%]" /><col className="w-[10%]" /></colgroup>
+                <thead>
                   <tr>
                     <th className={th}>#</th>
-                    <th className={`${th} text-left`}>Item Name</th>
+                    <th>Item Name</th>
                     <th className={th}>Batch</th>
                     <th className={th}>Exp</th>
-                    <th className={th}>Qty</th>
-                    <th className={th} title="Free units aren't charged">Free</th>
-                    <th className={th}>MRP</th>
-                    <th className={th}>Rate</th>
-                    <th className={th}>Amount</th>
-                    <th className={th}>GST%</th>
-                    <th className={th}>GST Amt</th>
-                    <th className={th}>Total</th>
+                    <th className={thNum}>Qty</th>
+                    <th className={thNum} title="Free units aren't charged">Free</th>
+                    <th className={thNum}>MRP</th>
+                    <th className={thNum}>Rate</th>
+                    <th className={thNum}>Amount</th>
+                    <th className={thNum}>GST%</th>
+                    <th className={thNum}>GST Amt</th>
+                    <th className={thNum}>Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {inv.items.map((l, i) => (
-                    <tr key={l.LineId} className="hover:bg-ink-50">
-                      <td className={`${td} text-center text-ink-400`}>{i + 1}</td>
-                      <td className={td}>{l.ItemName}</td>
-                      <td className={td}>{l.BatchNo}</td>
-                      <td className={`${td} text-center`}>{mmyy(l.ExpDate)}</td>
+                    <tr key={l.LineId}>
+                      <td className="ph-mid text-ink-400">{i + 1}</td>
+                      <td className="truncate" title={l.ItemName}>{l.ItemName}</td>
+                      <td className="ph-mid">{l.BatchNo}</td>
+                      <td className="ph-mid">{mmyy(l.ExpDate)}</td>
                       <td className={tdNum}>{num(l.Quantity)}</td>
                       <td className={tdNum}>{Number(l.FreeQty) ? num(l.FreeQty) : ''}</td>
                       <td className={tdNum}>{money(l.MRP)}</td>
@@ -217,14 +219,16 @@ export default function VendorPaymentEntry() {
                       <td className={`${tdNum} font-semibold`}>{money(l.LineTotal)}</td>
                     </tr>
                   ))}
-                  <tr className="bg-ink-50 font-semibold">
-                    <td className={`${td} text-right`} colSpan={8}>Total</td>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className="text-right" colSpan={8}>Total</td>
                     <td className={tdNum}>{money(totals.amount)}</td>
-                    <td className={td} />
+                    <td />
                     <td className={tdNum}>{money(totals.gst)}</td>
                     <td className={tdNum}>{money(inv.Total)}</td>
                   </tr>
-                </tbody>
+                </tfoot>
               </table>
             </div>
 
@@ -263,38 +267,41 @@ export default function VendorPaymentEntry() {
 
                 <h4 className="mb-1 mt-3 text-sm font-bold text-ink-800">Payments made</h4>
                 {inv.payments.length ? (
-                  <table className="w-full border-collapse text-[12px]">
-                    <thead className="bg-ink-50 text-ink-600">
+                  <div className="ph-wrap">
+                  <table className="ph-table min-w-[620px]">
+                    <colgroup><col className="w-[13%]" /><col className="w-[11%]" /><col className="w-[11%]" /><col className="w-[15%]" /><col className={isAdmin ? 'w-[22%]' : 'w-[28%]'} /><col className="w-[10%]" /><col className="w-[12%]" />{isAdmin && <col className="w-[6%]" />}</colgroup>
+                    <thead>
                       <tr>
                         <th className={th}>Payment No</th>
                         <th className={th}>Date</th>
                         <th className={th}>Mode</th>
                         <th className={th}>Reference No</th>
-                        <th className={`${th} text-left`}>Notes</th>
+                        <th>Notes</th>
                         <th className={th}>By</th>
-                        <th className={th}>Amount</th>
-                        {isAdmin && <th className={th} />}
+                        <th className={thNum}>Amount</th>
+                        {isAdmin && <th />}
                       </tr>
                     </thead>
                     <tbody>
                       {inv.payments.map((p) => (
                         <tr key={p.PaymentId}>
-                          <td className={`${td} font-medium text-brand-700`}>{p.PaymentNo}</td>
-                          <td className={`${td} text-center`}>{dateLabel(p.PayDate)}</td>
-                          <td className={td}>{p.PayMode}</td>
-                          <td className={td}>{p.ReferenceNo}</td>
-                          <td className={td}>{p.Notes}</td>
-                          <td className={td}>{p.CreatedBy}</td>
+                          <td className="ph-mid font-medium text-brand-700">{p.PaymentNo}</td>
+                          <td className="ph-mid">{dateLabel(p.PayDate)}</td>
+                          <td className="ph-mid">{p.PayMode}</td>
+                          <td className="ph-mid truncate">{p.ReferenceNo}</td>
+                          <td className="truncate" title={p.Notes || ''}>{p.Notes}</td>
+                          <td className="ph-mid truncate">{p.CreatedBy}</td>
                           <td className={tdNum}>{money(p.Amount)}</td>
                           {isAdmin && (
-                            <td className={`${td} text-center`}>
-                              <button type="button" className="rounded p-0.5 text-red-500 hover:bg-red-50" title="Delete payment" onClick={() => removePayment(p)}><Trash2 size={13} /></button>
+                            <td className="ph-mid">
+                              <button type="button" className="ph-icon-del" title="Delete payment" onClick={() => removePayment(p)}><Trash2 size={13} /></button>
                             </td>
                           )}
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 ) : <p className="text-xs text-ink-400">No payments yet.</p>}
               </form>
 

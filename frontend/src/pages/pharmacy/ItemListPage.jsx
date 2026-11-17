@@ -71,34 +71,35 @@ export default function ItemListPage() {
           <EmptyState message="No items found." />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+            <div className="ph-wrap">
+              <table className="ph-table min-w-[760px]">
+                <colgroup><col className="w-[11%]" /><col className="w-[35%]" /><col className="w-[15%]" /><col className="w-[8%]" /><col className="w-[10%]" /><col className="w-[8%]" /><col className="w-[8%]" /><col className="w-[5%]" /></colgroup>
                 <thead>
-                  <tr className="table-head">
-                    <th className="rounded-l-lg px-3 py-2">Item Code</th>
-                    <th className="px-3 py-2">Item Name</th>
-                    <th className="px-3 py-2">Category</th>
-                    <th className="px-3 py-2">Unit</th>
-                    <th className="px-3 py-2 text-right">Price</th>
-                    <th className="px-3 py-2 text-right">Stock</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="rounded-r-lg px-3 py-2 text-right">Edit</th>
+                  <tr>
+                    <th className="ph-mid">Item Code</th>
+                    <th>Item Name</th>
+                    <th>Category</th>
+                    <th className="ph-mid">Unit</th>
+                    <th className="ph-num">Price</th>
+                    <th className="ph-num">Stock</th>
+                    <th className="ph-mid">Status</th>
+                    <th className="ph-mid">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
                   {shown.map((r) => {
                     const low = Number(r.Stock) <= 0;
                     return (
-                      <tr key={r.ItemId} className="table-row">
-                        <td className="px-3 py-1.5 text-slate-500">{r.ItemCode}</td>
-                        <td className="px-3 py-1.5 font-medium text-slate-700">{r.Name}</td>
-                        <td className="px-3 py-1.5 text-slate-500">{r.Category || '-'}</td>
-                        <td className="px-3 py-1.5 text-slate-500">{r.UnitName || '-'}</td>
-                        <td className="px-3 py-1.5 text-right text-slate-600">{money(r.SellPrice ?? r.MRP)}</td>
-                        <td className={`px-3 py-1.5 text-right font-semibold ${low ? 'text-red-600' : 'text-slate-700'}`}>{Number(r.Stock)}</td>
-                        <td className="px-3 py-1.5"><span className={r.Status === 'Inactive' ? 'text-slate-400' : 'text-emerald-600'}>{r.Status}</span></td>
-                        <td className="px-3 py-1.5 text-right">
-                          <button type="button" className="btn-ghost px-2 py-1" title="Edit item" onClick={() => navigate('/pharmacy/item', { state: { editItemId: r.ItemId } })}><Pencil size={15} /></button>
+                      <tr key={r.ItemId}>
+                        <td className="ph-mid text-ink-500">{r.ItemCode}</td>
+                        <td className="truncate font-medium text-ink-800" title={r.Name}>{r.Name}</td>
+                        <td className="truncate text-ink-500">{r.Category || '-'}</td>
+                        <td className="ph-mid text-ink-500">{r.UnitName || '-'}</td>
+                        <td className="ph-num">{money(r.SellPrice ?? r.MRP)}</td>
+                        <td className={`ph-num font-semibold ${low ? 'text-red-600' : 'text-ink-800'}`}>{Number(r.Stock)}</td>
+                        <td className="ph-mid"><span className={r.Status === 'Inactive' ? 'text-ink-400' : 'text-emerald-600'}>{r.Status}</span></td>
+                        <td className="ph-mid">
+                          <button type="button" className="ph-icon" title="Edit item" onClick={() => navigate('/pharmacy/item', { state: { editItemId: r.ItemId } })}><Pencil size={14} /></button>
                         </td>
                       </tr>
                     );

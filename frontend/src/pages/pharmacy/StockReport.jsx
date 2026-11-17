@@ -27,16 +27,17 @@ function History({ itemId }) {
   if (!rows.length) return <p className="px-3 py-2 text-sm text-ink-400">No stock changes yet.</p>;
   // Newest first, as it's read top-down.
   return (
-    <table className="w-full text-xs">
+    <table className="ph-table bg-white text-[12px]">
+      <colgroup><col className="w-[15%]" /><col className="w-[11%]" /><col className="w-[33%]" /><col className="w-[16%]" /><col className="w-[8%]" /><col className="w-[8%]" /><col className="w-[9%]" /></colgroup>
       <thead>
-        <tr className="text-left text-ink-500">
-          <th className="px-2 py-1">Date &amp; Time</th>
-          <th className="px-2 py-1">Type</th>
-          <th className="px-2 py-1">Details</th>
-          <th className="px-2 py-1">Vendor</th>
-          <th className="px-2 py-1 text-right">Change</th>
-          <th className="px-2 py-1 text-right">Stock after</th>
-          <th className="px-2 py-1">By</th>
+        <tr>
+          <th className="ph-mid">Date &amp; Time</th>
+          <th className="ph-mid">Type</th>
+          <th>Details</th>
+          <th>Vendor</th>
+          <th className="ph-num">Change</th>
+          <th className="ph-num">Stock after</th>
+          <th className="ph-mid">By</th>
         </tr>
       </thead>
       <tbody>
@@ -44,14 +45,14 @@ function History({ itemId }) {
           const [label, tone] = KINDS[e.Kind] || [e.Kind, 'bg-slate-100 text-slate-700'];
           const change = Number(e.Qty);
           return (
-            <tr key={i} className="border-t border-ink-100">
-              <td className="whitespace-nowrap px-2 py-1">{when(e.At)}</td>
-              <td className="px-2 py-1"><span className={`rounded px-1.5 py-0.5 font-medium ${tone}`}>{label}</span></td>
-              <td className="px-2 py-1 text-ink-600">{e.Details}</td>
-              <td className="px-2 py-1 text-ink-500">{e.VendorName || '-'}</td>
-              <td className={`px-2 py-1 text-right font-medium ${change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{change > 0 ? '+' : ''}{qty(change)}</td>
-              <td className="px-2 py-1 text-right">{qty(e.BalanceAfter)}</td>
-              <td className="px-2 py-1 text-ink-500">{e.ByUser || '-'}</td>
+            <tr key={i}>
+              <td className="ph-mid whitespace-nowrap">{when(e.At)}</td>
+              <td className="ph-mid"><span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${tone}`}>{label}</span></td>
+              <td className="truncate text-ink-600" title={e.Details}>{e.Details}</td>
+              <td className="truncate text-ink-500">{e.VendorName || '-'}</td>
+              <td className={`ph-num font-medium ${change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{change > 0 ? '+' : ''}{qty(change)}</td>
+              <td className="ph-num">{qty(e.BalanceAfter)}</td>
+              <td className="ph-mid text-ink-500">{e.ByUser || '-'}</td>
             </tr>
           );
         })}
@@ -99,8 +100,8 @@ export default function StockReport() {
     return t;
   }, { Opening: 0, StockIn: 0, Returned: 0, Sold: 0, Adjustment: 0, CurrentStock: 0, StockValue: 0 }), [rows]);
 
-  const th = 'px-2 py-2';
-  const td = 'px-2 py-1.5';
+  const th = '';
+  const td = '';
 
   return (
     <div>
@@ -138,22 +139,23 @@ export default function StockReport() {
         ) : rows.length === 0 ? (
           <EmptyState message="No items match." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+          <div className="ph-wrap">
+            <table className="ph-table min-w-[960px]">
+              <colgroup><col className="w-[9%]" /><col className="w-[21%]" /><col className="w-[10%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[9%]" /></colgroup>
               <thead>
-                <tr className="table-head">
-                  <th className={`${th} rounded-l-lg`}>Item Code</th>
+                <tr>
+                  <th className="ph-mid">Item Code</th>
                   <th className={th}>Item Name</th>
                   <th className={th}>Category</th>
-                  <th className={th}>Pack</th>
-                  <th className={`${th} text-right`}>Opening</th>
-                  <th className={`${th} text-right`}>Stock In</th>
-                  <th className={`${th} text-right`}>Return</th>
-                  <th className={`${th} text-right`}>Sold</th>
-                  <th className={`${th} text-right`}>Adjustment</th>
-                  <th className={`${th} bg-brand-100/60 text-right`}>Current Stock</th>
-                  <th className={`${th} text-right`}>Sell Price</th>
-                  <th className={`${th} rounded-r-lg text-right`}>Stock Value</th>
+                  <th className="ph-mid">Pack</th>
+                  <th className={`ph-num`}>Opening</th>
+                  <th className={`ph-num`}>Stock In</th>
+                  <th className={`ph-num`}>Return</th>
+                  <th className={`ph-num`}>Sold</th>
+                  <th className={`ph-num`}>Adjustment</th>
+                  <th className="ph-num !bg-brand-100">Current Stock</th>
+                  <th className={`ph-num`}>Sell Price</th>
+                  <th className="ph-num">Stock Value</th>
                 </tr>
               </thead>
               <tbody>
@@ -163,27 +165,27 @@ export default function StockReport() {
                   return (
                     <Fragment key={r.ItemId}>
                       <tr
-                        className={`cursor-pointer border-b border-ink-100 hover:bg-ink-50 ${out ? 'text-ink-400' : ''}`}
+                        className={`cursor-pointer ${out ? 'text-ink-400' : ''}`}
                         onClick={() => setOpenId(open ? null : r.ItemId)}
                       >
-                        <td className={`${td} whitespace-nowrap`}>
+                        <td className="whitespace-nowrap">
                           {open ? <ChevronDown size={14} className="mr-1 inline" /> : <ChevronRight size={14} className="mr-1 inline" />}
                           {r.ItemCode}
                         </td>
-                        <td className={`${td} font-medium ${out ? '' : 'text-ink-800'}`}>{r.ItemName}</td>
-                        <td className={td}>{r.Category || '-'}</td>
-                        <td className={td}>{r.Pack || '-'}</td>
-                        <td className={`${td} text-right`}>{qty(r.Opening)}</td>
-                        <td className={`${td} text-right ${out ? '' : 'text-emerald-600'}`}>{qty(r.StockIn)}</td>
-                        <td className={`${td} text-right ${out ? '' : 'text-red-600'}`}>{qty(r.Returned)}</td>
-                        <td className={`${td} text-right ${out ? '' : 'text-red-600'}`}>{qty(r.Sold)}</td>
-                        <td className={`${td} text-right`}>{qty(r.Adjustment)}</td>
-                        <td className={`${td} bg-brand-50/70 text-right font-semibold`}>{qty(r.CurrentStock)}</td>
-                        <td className={`${td} text-right`}>{money(r.SellPrice)}</td>
-                        <td className={`${td} text-right`}>{money(r.StockValue)}</td>
+                        <td className={`truncate font-medium ${out ? '' : 'text-ink-800'}`} title={r.ItemName}>{r.ItemName}</td>
+                        <td className="truncate">{r.Category || '-'}</td>
+                        <td className="ph-mid">{r.Pack || '-'}</td>
+                        <td className={`ph-num`}>{qty(r.Opening)}</td>
+                        <td className={`ph-num ${out ? '' : 'text-emerald-600'}`}>{qty(r.StockIn)}</td>
+                        <td className={`ph-num ${out ? '' : 'text-red-600'}`}>{qty(r.Returned)}</td>
+                        <td className={`ph-num ${out ? '' : 'text-red-600'}`}>{qty(r.Sold)}</td>
+                        <td className={`ph-num`}>{qty(r.Adjustment)}</td>
+                        <td className="ph-num bg-brand-50/70 font-semibold">{qty(r.CurrentStock)}</td>
+                        <td className={`ph-num`}>{money(r.SellPrice)}</td>
+                        <td className={`ph-num`}>{money(r.StockValue)}</td>
                       </tr>
                       {open && (
-                        <tr className="bg-ink-50/60">
+                        <tr className="!bg-ink-50">
                           <td colSpan={12} className="px-4 py-2"><History itemId={r.ItemId} /></td>
                         </tr>
                       )}
@@ -192,16 +194,16 @@ export default function StockReport() {
                 })}
               </tbody>
               <tfoot>
-                <tr className="bg-ink-800 font-semibold text-white">
-                  <td className={td} colSpan={4}>Total ({rows.length} items)</td>
-                  <td className={`${td} text-right`}>{qty(totals.Opening)}</td>
-                  <td className={`${td} text-right`}>{qty(totals.StockIn)}</td>
-                  <td className={`${td} text-right`}>{qty(totals.Returned)}</td>
-                  <td className={`${td} text-right`}>{qty(totals.Sold)}</td>
-                  <td className={`${td} text-right`}>{qty(totals.Adjustment)}</td>
-                  <td className={`${td} text-right`}>{qty(totals.CurrentStock)}</td>
+                <tr>
+                  <td className="text-right" colSpan={4}>Total ({rows.length} items)</td>
+                  <td className={`ph-num`}>{qty(totals.Opening)}</td>
+                  <td className={`ph-num`}>{qty(totals.StockIn)}</td>
+                  <td className={`ph-num`}>{qty(totals.Returned)}</td>
+                  <td className={`ph-num`}>{qty(totals.Sold)}</td>
+                  <td className={`ph-num`}>{qty(totals.Adjustment)}</td>
+                  <td className={`ph-num`}>{qty(totals.CurrentStock)}</td>
                   <td className={td} />
-                  <td className={`${td} text-right`}>{money(totals.StockValue)}</td>
+                  <td className={`ph-num`}>{money(totals.StockValue)}</td>
                 </tr>
               </tfoot>
             </table>

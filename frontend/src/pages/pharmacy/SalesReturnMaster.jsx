@@ -144,9 +144,10 @@ export default function SalesReturnMaster() {
     }
   };
 
-  const cell = 'border border-ink-200 px-1 py-0.5';
-  const ro = 'px-1.5 text-right text-ink-600';
-  const box = 'w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] focus:border-brand-400 focus:bg-white focus:outline-none';
+  // Shared Pharmacy grid look (index.css .ph-table / .ph-box).
+  const cell = '';
+  const ro = 'ph-num text-ink-600';
+  const box = 'ph-box';
   const tab = (on) => `rounded-md px-3 py-1.5 text-sm font-medium ${on ? 'bg-white text-brand-700 shadow-sm' : 'text-ink-500 hover:text-ink-700'}`;
 
   return (
@@ -206,20 +207,21 @@ export default function SalesReturnMaster() {
             </p>
           )}
 
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[900px] border-collapse text-left text-[13px]" {...gridKeys}>
+          <div className="ph-wrap mt-3">
+            <table className="ph-table min-w-[900px]" {...gridKeys}>
+              <colgroup><col className="w-[25%]" /><col className="w-[11%]" /><col className="w-[7%]" /><col className="w-[6%]" /><col className="w-[9%]" /><col className="w-[7%]" /><col className="w-[7%]" /><col className="w-[8%]" /><col className="w-[10%]" /><col className="w-[10%]" /></colgroup>
               <thead>
-                <tr className="bg-brand-50 font-bold text-brand-700">
-                  <th className={`${cell} min-w-[180px] px-1.5`}>Item Name</th>
-                  <th className={`${cell} px-1.5`}>Batch No</th>
-                  <th className={`${cell} px-1.5`}>Exp.Date</th>
-                  <th className={`${cell} px-1.5`}>Unit</th>
-                  <th className={`${cell} w-20 px-1.5 text-right`}>Sale Price</th>
-                  <th className={`${cell} w-16 px-1.5 text-right`}>Disc %</th>
-                  <th className={`${cell} w-16 px-1.5 text-right`}>Sold</th>
-                  <th className={`${cell} w-20 px-1.5 text-right`}>Returned</th>
-                  <th className={`${cell} w-24 px-1.5 text-right`}>Return Qty</th>
-                  <th className={`${cell} w-24 px-1.5 text-right`}>Amount</th>
+                <tr>
+                  <th>Item Name</th>
+                  <th className="ph-mid">Batch No</th>
+                  <th className="ph-mid">Exp.Date</th>
+                  <th className="ph-mid">Unit</th>
+                  <th className="ph-num">Sale Price</th>
+                  <th className="ph-num">Disc %</th>
+                  <th className="ph-num">Sold</th>
+                  <th className="ph-num">Returned</th>
+                  <th className="ph-num">Return Qty</th>
+                  <th className="ph-num">Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -232,9 +234,9 @@ export default function SalesReturnMaster() {
                   return (
                     <tr key={r.SalesLineId} className={none ? 'text-ink-400' : ''} title={none ? 'Nothing left to return on this line' : p || ''}>
                       <td className={`${cell} px-1.5 font-medium`}>{r.ItemName}{p && <p className="text-[11px] font-normal text-red-600">{p}</p>}</td>
-                      <td className={`${cell} px-1.5`}>{r.Batch || '-'}</td>
-                      <td className={`${cell} px-1.5`}>{monthLabel(r.ExpiryDate)}</td>
-                      <td className={`${cell} px-1.5`}>{r.SaleUnit === 'unit' ? 'Unit' : 'Pack'}</td>
+                      <td className="ph-mid">{r.Batch || '-'}</td>
+                      <td className="ph-mid">{monthLabel(r.ExpiryDate)}</td>
+                      <td className="ph-mid">{r.SaleUnit === 'unit' ? 'Unit' : 'Pack'}</td>
                       <td className={`${cell} ${ro}`}>{money(r.Rate)}</td>
                       <td className={`${cell} ${ro}`}>{r.DiscPercent ? Number(r.DiscPercent) : ''}</td>
                       <td className={`${cell} ${ro}`}>{r.Sold}</td>
@@ -242,7 +244,7 @@ export default function SalesReturnMaster() {
                       <td className={cell}>
                         <input
                           type="number" min="0" max={r.Left} step="any" data-r={i} data-c={0} disabled={none}
-                          className={`${box} no-spin text-right ${p ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          className={`${box} no-spin text-right tabular-nums ${p ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={r.qty} placeholder={none ? '' : `max ${r.Left}`} onChange={(e) => setQty(i, e.target.value)}
                         />
                       </td>
@@ -252,19 +254,19 @@ export default function SalesReturnMaster() {
                 })}
               </tbody>
               <tfoot>
-                <tr className="bg-ink-50 font-semibold">
-                  <td className={`${cell} px-2 text-right`} colSpan={9}>Sub Total</td>
-                  <td className={`${cell} px-1.5 text-right`}>{money(bill.subTotal)}</td>
+                <tr>
+                  <td className="text-right" colSpan={9}>Sub Total</td>
+                  <td className="ph-num">{money(bill.subTotal)}</td>
                 </tr>
                 {Number(sale?.DiscPercent) > 0 && (
-                  <tr className="bg-ink-50">
-                    <td className={`${cell} px-2 text-right`} colSpan={9}>Bill Discount {Number(sale.DiscPercent)}%</td>
-                    <td className={`${cell} px-1.5 text-right`}>-{money(bill.discountAmount)}</td>
+                  <tr className="font-normal">
+                    <td className="text-right" colSpan={9}>Bill Discount {Number(sale.DiscPercent)}%</td>
+                    <td className="ph-num text-red-600">-{money(bill.discountAmount)}</td>
                   </tr>
                 )}
-                <tr className="bg-ink-50 font-bold text-ink-800">
-                  <td className={`${cell} px-2 text-right`} colSpan={9}>Refund Amount</td>
-                  <td className={`${cell} px-1.5 text-right`}>{money(bill.total)}</td>
+                <tr className="bg-brand-50 font-bold text-brand-800">
+                  <td className="text-right" colSpan={9}>Refund Amount</td>
+                  <td className="ph-num">{money(bill.total)}</td>
                 </tr>
               </tfoot>
             </table>

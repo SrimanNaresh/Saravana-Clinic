@@ -118,8 +118,6 @@ export default function AllInOneReport() {
     return Object.keys(t).length ? t : null;
   }, [report]);
 
-  const th = 'px-2 py-2';
-  const td = 'px-2 py-1.5';
 
   return (
     <div>
@@ -209,22 +207,23 @@ export default function AllInOneReport() {
             {report.rows.length === 0 ? (
               <EmptyState message="Nothing to show for this selection." />
             ) : (
-              <div className="overflow-x-auto print:overflow-visible">
-                <table className="w-full text-left text-sm print:text-xs">
+              <div className="ph-wrap print:overflow-visible">
+                {/* Columns are picked by the user, so widths follow the content (table-auto). */}
+                <table className="ph-table table-auto print:text-xs">
                   <thead>
-                    <tr className="table-head">
-                      <th className={`${th} rounded-l-lg text-right`}>#</th>
-                      {report.columns.map((c, i) => (
-                        <th key={c.key} className={`${th} ${NUMERIC.includes(c.type) ? 'text-right' : ''} ${i === report.columns.length - 1 ? 'rounded-r-lg' : ''}`}>{c.label}</th>
+                    <tr>
+                      <th className="ph-num w-8">#</th>
+                      {report.columns.map((c) => (
+                        <th key={c.key} className={NUMERIC.includes(c.type) ? 'ph-num' : c.type === 'date' ? 'ph-mid' : ''}>{c.label}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {report.rows.map((r, n) => (
-                      <tr key={n} className="border-b border-ink-100 break-inside-avoid">
-                        <td className={`${td} text-right text-ink-400`}>{n + 1}</td>
+                      <tr key={n} className="break-inside-avoid">
+                        <td className="ph-num text-ink-400">{n + 1}</td>
                         {report.columns.map((c) => (
-                          <td key={c.key} className={`${td} ${NUMERIC.includes(c.type) ? 'whitespace-nowrap text-right' : ''} ${c.type === 'date' ? 'whitespace-nowrap' : ''}`}>
+                          <td key={c.key} className={NUMERIC.includes(c.type) ? 'ph-num whitespace-nowrap' : c.type === 'date' ? 'ph-mid whitespace-nowrap' : ''}>
                             {FORMAT[c.type](r[c.key])}
                           </td>
                         ))}
@@ -233,10 +232,10 @@ export default function AllInOneReport() {
                   </tbody>
                   {totals && (
                     <tfoot>
-                      <tr className="bg-ink-800 font-semibold text-white print:bg-white print:text-ink-900">
-                        <td className={td}>Total</td>
+                      <tr>
+                        <td>Total</td>
                         {report.columns.map((c) => (
-                          <td key={c.key} className={`${td} whitespace-nowrap text-right`}>
+                          <td key={c.key} className="ph-num whitespace-nowrap">
                             {c.key in totals ? FORMAT[c.type](totals[c.key]) : ''}
                           </td>
                         ))}

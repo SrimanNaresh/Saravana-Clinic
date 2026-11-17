@@ -108,9 +108,10 @@ export default function StockReturnMaster() {
     }
   };
 
-  const cell = 'border border-ink-200 px-1 py-0.5';
-  const ro = 'px-1.5 text-right text-ink-600';
-  const box = 'w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] focus:border-brand-400 focus:bg-white focus:outline-none';
+  // Shared Pharmacy grid look (index.css .ph-table / .ph-box).
+  const cell = '';
+  const ro = 'ph-num text-ink-600';
+  const box = 'ph-box';
 
   return (
     <div>
@@ -141,19 +142,20 @@ export default function StockReturnMaster() {
             </div>
           </div>
 
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[860px] border-collapse text-left text-[13px]" {...gridKeys}>
+          <div className="ph-wrap mt-3">
+            <table className="ph-table min-w-[860px]" {...gridKeys}>
+              <colgroup><col className="w-[26%]" /><col className="w-[11%]" /><col className="w-[8%]" /><col className="w-[8%]" /><col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[10%]" /><col className="w-[10%]" /></colgroup>
               <thead>
-                <tr className="bg-brand-50 font-bold text-brand-700">
-                  <th className={`${cell} min-w-[180px] px-1.5`}>Item Name</th>
-                  <th className={`${cell} px-1.5`}>Batch No</th>
-                  <th className={`${cell} px-1.5`}>Mf.Date</th>
-                  <th className={`${cell} px-1.5`}>Exp.Date</th>
-                  <th className={`${cell} w-20 px-1.5 text-right`}>Cur.Rate</th>
-                  <th className={`${cell} w-20 px-1.5 text-right`}>Received</th>
-                  <th className={`${cell} w-20 px-1.5 text-right`}>Returned</th>
-                  <th className={`${cell} w-24 px-1.5 text-right`}>Return Qty</th>
-                  <th className={`${cell} w-24 px-1.5 text-right`}>Amount</th>
+                <tr>
+                  <th>Item Name</th>
+                  <th className="ph-mid">Batch No</th>
+                  <th className="ph-mid">Mf.Date</th>
+                  <th className="ph-mid">Exp.Date</th>
+                  <th className="ph-num">Cur.Rate</th>
+                  <th className="ph-num">Received</th>
+                  <th className="ph-num">Returned</th>
+                  <th className="ph-num">Return Qty</th>
+                  <th className="ph-num">Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -166,16 +168,16 @@ export default function StockReturnMaster() {
                   return (
                     <tr key={r.StockInLineId} className={none ? 'text-ink-400' : ''} title={none ? 'Nothing left to return on this line' : p || ''}>
                       <td className={`${cell} px-1.5 font-medium`}>{r.ItemName}{p && <p className="text-[11px] font-normal text-red-600">{p}</p>}</td>
-                      <td className={`${cell} px-1.5`}>{r.BatchNo}</td>
-                      <td className={`${cell} px-1.5`}>{monthLabel(r.MfgDate)}</td>
-                      <td className={`${cell} px-1.5`}>{monthLabel(r.ExpDate)}</td>
+                      <td className="ph-mid">{r.BatchNo}</td>
+                      <td className="ph-mid">{monthLabel(r.MfgDate)}</td>
+                      <td className="ph-mid">{monthLabel(r.ExpDate)}</td>
                       <td className={`${cell} ${ro}`}>{money(r.Rate)}</td>
                       <td className={`${cell} ${ro}`}>{r.Received}</td>
                       <td className={`${cell} ${ro}`}>{r.Returned}</td>
                       <td className={cell}>
                         <input
                           type="number" min="0" max={r.Left} step="any" data-r={i} data-c={0} disabled={none}
-                          className={`${box} no-spin text-right ${p ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                          className={`${box} no-spin text-right tabular-nums ${p ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
                           value={r.qty} placeholder={none ? '' : `max ${r.Left}`} onChange={(e) => setQty(i, e.target.value)}
                         />
                       </td>
@@ -185,9 +187,9 @@ export default function StockReturnMaster() {
                 })}
               </tbody>
               <tfoot>
-                <tr className="bg-ink-50 font-semibold">
-                  <td className={`${cell} px-2 text-right`} colSpan={8}>Sum of Total</td>
-                  <td className={`${cell} px-1.5 text-right`}>{money(total)}</td>
+                <tr>
+                  <td className="text-right" colSpan={8}>Sum of Total</td>
+                  <td className="ph-num">{money(total)}</td>
                 </tr>
               </tfoot>
             </table>

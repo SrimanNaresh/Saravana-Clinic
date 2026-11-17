@@ -115,16 +115,17 @@ export default function StockInList() {
     }
   };
   const editButton = (stockInId, no) => (
-    <button type="button" className="btn-ghost px-2 py-1 text-brand-600 hover:bg-brand-50" title={`Edit ${no} (Admin only)`} onClick={() => navigate('/pharmacy/stock-in', { state: { editStockInId: stockInId } })}><Pencil size={15} /></button>
+    <button type="button" className="ph-icon" title={`Edit ${no} (Admin only)`} onClick={() => navigate('/pharmacy/stock-in', { state: { editStockInId: stockInId } })}><Pencil size={14} /></button>
   );
   const binButton = (stockInId, no) => (
-    <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title={`Delete ${no} (Admin only)`} onClick={() => remove(stockInId)}><Trash2 size={15} /></button>
+    <button type="button" className="ph-icon-del" title={`Delete ${no} (Admin only)`} onClick={() => remove(stockInId)}><Trash2 size={14} /></button>
   );
 
   const toggle = (key) => setOpen((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
-  const cell = 'border border-ink-200 px-2 py-1';
-  const r = 'text-right';
+  const cell = '';
+  const r = 'ph-num';
+  const c = 'ph-mid';
   const totalsCells = (t) => (
     <>
       <td className={`${cell} ${r}`}>{t.qty}</td>
@@ -181,20 +182,28 @@ export default function StockInList() {
               ))}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[960px] border-collapse text-left text-[13px]">
+            <div className="ph-wrap">
+              <table className="ph-table min-w-[960px]">
+                {/* Column shares add up to 100% (the item column takes the Edit share when it's hidden). */}
+                {tab === 'item' ? (
+                  <colgroup><col className={isAdmin ? 'w-[22%]' : 'w-[31%]'} /><col className="w-[6%]" /><col className="w-[9%]" /><col className="w-[15%]" /><col className="w-[7%]" />
+                    {AMOUNT_HEADS.map((h) => <col key={h} className="w-[8%]" />)}{isAdmin && <col className="w-[9%]" />}</colgroup>
+                ) : (
+                  <colgroup><col className="w-[17%]" /><col className={isAdmin ? 'w-[20%]' : 'w-[29%]'} /><col className="w-[9%]" /><col className="w-[6%]" /><col className="w-[7%]" />
+                    {AMOUNT_HEADS.map((h) => <col key={h} className="w-[8%]" />)}{isAdmin && <col className="w-[9%]" />}</colgroup>
+                )}
                 <thead>
                   {tab === 'item' ? (
-                    <tr className="bg-brand-50 font-bold text-brand-700">
-                      <th className={cell}>Item / Batch No</th><th className={cell}>Exp</th><th className={cell}>Stock In No</th><th className={cell}>Vendor</th>
+                    <tr>
+                      <th className={cell}>Item / Batch No</th><th className={c}>Exp</th><th className={c}>Stock In No</th><th className={cell}>Vendor</th>
                       <th className={`${cell} ${r}`}>Quantity</th>{AMOUNT_HEADS.map((h) => <th key={h} className={`${cell} ${r}`}>{h}</th>)}
-                      {isAdmin && <th className={`${cell} w-24 text-center`}>Edit / Delete</th>}
+                      {isAdmin && <th className={c}>Edit / Delete</th>}
                     </tr>
                   ) : (
-                    <tr className="bg-brand-50 font-bold text-brand-700">
-                      <th className={cell}>Stock In No · Vendor</th><th className={cell}>Item</th><th className={cell}>Batch No</th><th className={cell}>Exp</th>
+                    <tr>
+                      <th className={cell}>Stock In No · Vendor</th><th className={cell}>Item</th><th className={c}>Batch No</th><th className={c}>Exp</th>
                       <th className={`${cell} ${r}`}>Quantity</th>{AMOUNT_HEADS.map((h) => <th key={h} className={`${cell} ${r}`}>{h}</th>)}
-                      {isAdmin && <th className={`${cell} w-24 text-center`}>Edit / Delete</th>}
+                      {isAdmin && <th className={c}>Edit / Delete</th>}
                     </tr>
                   )}
                 </thead>
@@ -204,7 +213,7 @@ export default function StockInList() {
                     const t = sum(g.lines);
                     return (
                       <Fragment key={itemId}>
-                        <tr className="cursor-pointer bg-ink-50/70 font-semibold hover:bg-ink-100/70" onClick={() => toggle(`i${itemId}`)}>
+                        <tr className="cursor-pointer !bg-ink-100/60 font-semibold hover:!bg-brand-50" onClick={() => toggle(`i${itemId}`)}>
                           <td className={cell} colSpan={4}>
                             {isOpen ? <ChevronDown size={14} className="mr-1 inline" /> : <ChevronRight size={14} className="mr-1 inline" />}
                             {g.name} <span className="font-normal text-ink-400">· {g.lines.length} batch(es)</span>
@@ -215,13 +224,13 @@ export default function StockInList() {
                         {isOpen && g.lines.map((l) => (
                           <tr key={l.LineId}>
                             <td className={`${cell} pl-7`}>{l.BatchNo}</td>
-                            <td className={cell}>{expLabel(l.ExpDate)}</td>
-                            <td className={`${cell} text-brand-700`} title={dateLabel(l.InDate)}>{l.StockInNo}</td>
-                            <td className={cell}>{l.VendorName}</td>
+                            <td className={c}>{expLabel(l.ExpDate)}</td>
+                            <td className={`${c} text-brand-700`} title={dateLabel(l.InDate)}>{l.StockInNo}</td>
+                            <td className="truncate" title={l.VendorName}>{l.VendorName}</td>
                             {amountCells(l)}
                             {isAdmin && (
                               <td className={`${cell} text-center`}>
-                                <div className="flex justify-center gap-1">{editButton(l.StockInId, l.StockInNo)}{binButton(l.StockInId, l.StockInNo)}</div>
+                                <div className="flex justify-center gap-0.5">{editButton(l.StockInId, l.StockInNo)}{binButton(l.StockInId, l.StockInNo)}</div>
                               </td>
                             )}
                           </tr>
@@ -235,7 +244,7 @@ export default function StockInList() {
                     const t = sum(all);
                     return (
                       <Fragment key={date}>
-                        <tr className="bg-ink-50/70 font-semibold">
+                        <tr className="!bg-ink-100/60 font-semibold">
                           <td className={cell} colSpan={4}>{dateLabel(date)} <span className="font-normal text-ink-400">· {ins.size} Stock In(s) · {all.length} batch(es)</span></td>
                           {totalsCells(t)}
                           {isAdmin && <td className={cell} />}
@@ -248,13 +257,13 @@ export default function StockInList() {
                                 <div className="text-[11px] text-ink-500">{l.VendorName} · {l.OrderNo}</div>
                               </td>
                             )}
-                            <td className={cell}>{l.ItemName}</td>
-                            <td className={cell}>{l.BatchNo}</td>
-                            <td className={cell}>{expLabel(l.ExpDate)}</td>
+                            <td className="truncate" title={l.ItemName}>{l.ItemName}</td>
+                            <td className={c}>{l.BatchNo}</td>
+                            <td className={c}>{expLabel(l.ExpDate)}</td>
                             {amountCells(l)}
                             {k === 0 && isAdmin && (
                               <td className={`${cell} text-center align-middle`} rowSpan={ls.length}>
-                                <div className="flex justify-center gap-1">{editButton(sid, l.StockInNo)}{binButton(sid, l.StockInNo)}</div>
+                                <div className="flex justify-center gap-0.5">{editButton(sid, l.StockInNo)}{binButton(sid, l.StockInNo)}</div>
                               </td>
                             )}
                           </tr>
@@ -264,8 +273,8 @@ export default function StockInList() {
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="bg-ink-800 font-semibold text-white">
-                    <td className={cell} colSpan={4}>Total</td>
+                  <tr>
+                    <td className="text-right" colSpan={4}>Total</td>
                     {totalsCells(total)}
                     {isAdmin && <td className={cell} />}
                   </tr>

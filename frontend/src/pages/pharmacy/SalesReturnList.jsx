@@ -70,37 +70,38 @@ export default function SalesReturnList() {
           }
         />
         {loading ? <Spinner /> : rows.length === 0 ? <EmptyState message="No Sales Returns found." /> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="ph-wrap">
+            <table className="ph-table min-w-[950px]">
+              <colgroup><col className="w-[9%]" /><col className="w-[8%]" /><col className="w-[14%]" /><col className="w-[10%]" /><col className="w-[9%]" /><col className="w-[26%]" /><col className="w-[7%]" /><col className="w-[8%]" /><col className="w-[9%]" /></colgroup>
               <thead>
-                <tr className="table-head">
-                  <th className="rounded-l-lg px-3 py-2">Return No</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Customer</th>
-                  <th className="px-3 py-2">Mobile</th>
-                  <th className="px-3 py-2">Sale No</th>
-                  <th className="px-3 py-2">Item Name</th>
-                  <th className="px-3 py-2 text-right">Total Qty</th>
-                  <th className="px-3 py-2 text-right">Refund</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
+                <tr>
+                  <th className="ph-mid">Return No</th>
+                  <th className="ph-mid">Date</th>
+                  <th>Customer</th>
+                  <th className="ph-mid">Mobile</th>
+                  <th className="ph-mid">Sale No</th>
+                  <th>Item Name</th>
+                  <th className="ph-num">Total Qty</th>
+                  <th className="ph-num">Refund</th>
+                  <th className="ph-mid">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.SalesReturnId} className="table-row">
-                    <td className="px-3 py-1.5 font-medium text-brand-700">{r.ReturnNo}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{dateLabel(r.ReturnDate)}</td>
-                    <td className="px-3 py-1.5 text-slate-700">{r.CustomerName || '-'}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{r.MobileNo || '-'}</td>
-                    <td className="px-3 py-1.5 text-slate-600" title={`Sold ${dateLabel(r.SaleDate)}`}>{r.SaleNo}</td>
-                    <td className="max-w-xs truncate px-3 py-1.5 text-slate-500" title={r.ItemNames}>{r.ItemNames}</td>
-                    <td className="px-3 py-1.5 text-right">{Number(r.TotalQty)}</td>
-                    <td className="px-3 py-1.5 text-right font-semibold text-slate-800">{money(r.TotalAmount)}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex justify-end gap-1">
-                        <button type="button" className="btn-ghost px-2 py-1" title="Edit Sales Return" onClick={() => navigate('/pharmacy/sales-return', { state: { editSalesReturnId: r.SalesReturnId } })}><Pencil size={15} /></button>
+                  <tr key={r.SalesReturnId}>
+                    <td className="font-medium text-brand-700 ph-mid">{r.ReturnNo}</td>
+                    <td className="text-ink-500 ph-mid">{dateLabel(r.ReturnDate)}</td>
+                    <td className="text-ink-700 truncate">{r.CustomerName || '-'}</td>
+                    <td className="text-ink-500 ph-mid">{r.MobileNo || '-'}</td>
+                    <td className="text-ink-600 ph-mid" title={`Sold ${dateLabel(r.SaleDate)}`}>{r.SaleNo}</td>
+                    <td className="truncate text-ink-500" title={r.ItemNames}>{r.ItemNames}</td>
+                    <td className="ph-num">{Number(r.TotalQty)}</td>
+                    <td className="ph-num font-semibold text-ink-800">{money(r.TotalAmount)}</td>
+                    <td>
+                      <div className="flex justify-center gap-0.5">
+                        <button type="button" className="ph-icon" title="Edit Sales Return" onClick={() => navigate('/pharmacy/sales-return', { state: { editSalesReturnId: r.SalesReturnId } })}><Pencil size={14} /></button>
                         {isAdmin && (
-                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete Sales Return (Admin only)" onClick={() => remove(r)}><Trash2 size={15} /></button>
+                          <button type="button" className="ph-icon-del" title="Delete Sales Return (Admin only)" onClick={() => remove(r)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>

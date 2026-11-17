@@ -69,37 +69,38 @@ export default function StockReturnList() {
           }
         />
         {loading ? <Spinner /> : rows.length === 0 ? <EmptyState message="No returns found." /> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="ph-wrap">
+            <table className="ph-table min-w-[950px]">
+              <colgroup><col className="w-[9%]" /><col className="w-[8%]" /><col className="w-[16%]" /><col className="w-[10%]" /><col className="w-[27%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[8%]" /><col className="w-[9%]" /></colgroup>
               <thead>
-                <tr className="table-head">
-                  <th className="rounded-l-lg px-3 py-2">Return No</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Vendor</th>
-                  <th className="px-3 py-2">Stock In No</th>
-                  <th className="px-3 py-2">Item Name</th>
-                  <th className="px-3 py-2 text-right">Items</th>
-                  <th className="px-3 py-2 text-right">Total Qty</th>
-                  <th className="px-3 py-2 text-right">Amount</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
+                <tr>
+                  <th className="ph-mid">Return No</th>
+                  <th className="ph-mid">Date</th>
+                  <th>Vendor</th>
+                  <th className="ph-mid">Stock In No</th>
+                  <th>Item Name</th>
+                  <th className="ph-num">Items</th>
+                  <th className="ph-num">Total Qty</th>
+                  <th className="ph-num">Amount</th>
+                  <th className="ph-mid">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.StockReturnId} className="table-row">
-                    <td className="px-3 py-1.5 font-medium text-brand-700">{r.ReturnNo}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{dateLabel(r.ReturnDate)}</td>
-                    <td className="px-3 py-1.5 text-slate-700">{r.VendorName}</td>
-                    <td className="px-3 py-1.5 text-slate-600">{r.StockInNo}</td>
-                    <td className="max-w-xs truncate px-3 py-1.5 text-slate-500" title={r.ItemNames}>{r.ItemNames}</td>
-                    <td className="px-3 py-1.5 text-right">{r.Items}</td>
-                    <td className="px-3 py-1.5 text-right">{Number(r.TotalQty)}</td>
-                    <td className="px-3 py-1.5 text-right font-semibold text-slate-800">{money(r.TotalAmount)}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex justify-end gap-1">
-                        <button type="button" className="btn-ghost px-2 py-1" title="Edit return" onClick={() => navigate('/pharmacy/return', { state: { editReturnId: r.StockReturnId } })}><Pencil size={15} /></button>
+                  <tr key={r.StockReturnId}>
+                    <td className="font-medium text-brand-700 ph-mid">{r.ReturnNo}</td>
+                    <td className="text-ink-500 ph-mid">{dateLabel(r.ReturnDate)}</td>
+                    <td className="text-ink-700 truncate">{r.VendorName}</td>
+                    <td className="text-ink-600 ph-mid">{r.StockInNo}</td>
+                    <td className="truncate text-ink-500" title={r.ItemNames}>{r.ItemNames}</td>
+                    <td className="ph-num">{r.Items}</td>
+                    <td className="ph-num">{Number(r.TotalQty)}</td>
+                    <td className="ph-num font-semibold text-ink-800">{money(r.TotalAmount)}</td>
+                    <td>
+                      <div className="flex justify-center gap-0.5">
+                        <button type="button" className="ph-icon" title="Edit return" onClick={() => navigate('/pharmacy/return', { state: { editReturnId: r.StockReturnId } })}><Pencil size={14} /></button>
                         {isAdmin && (
-                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete return (Admin only)" onClick={() => remove(r)}><Trash2 size={15} /></button>
+                          <button type="button" className="ph-icon-del" title="Delete return (Admin only)" onClick={() => remove(r)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>

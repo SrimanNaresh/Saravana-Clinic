@@ -114,42 +114,54 @@ export default function SalesBillingList() {
         ) : rows.length === 0 ? (
           <EmptyState message="No sales found." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="ph-wrap">
+            <table className="ph-table min-w-[900px]">
+              <colgroup>
+                <col className="w-[9%]" /><col className="w-[8%]" /><col className="w-[15%]" /><col className="w-[10%]" />
+                <col className="w-[32%]" /><col className="w-[7%]" /><col className="w-[9%]" /><col className="w-[10%]" />
+              </colgroup>
               <thead>
-                <tr className="table-head">
-                  <th className="rounded-l-lg px-3 py-2">Sale No</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Customer</th>
-                  <th className="px-3 py-2">Mobile</th>
-                  <th className="px-3 py-2">Item Name</th>
-                  <th className="px-3 py-2 text-right">Total Qty</th>
-                  <th className="px-3 py-2 text-right">Amount</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
+                <tr>
+                  <th className="ph-mid">Sale No</th>
+                  <th className="ph-mid">Date</th>
+                  <th>Customer</th>
+                  <th className="ph-mid">Mobile</th>
+                  <th>Item Name</th>
+                  <th className="ph-num">Total Qty</th>
+                  <th className="ph-num">Amount</th>
+                  <th className="ph-mid">{isAdmin ? 'Edit / Delete' : 'Edit'}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.SalesBillingId} className="table-row">
-                    <td className="px-3 py-1.5 font-medium text-slate-700">{r.Code}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{dateLabel(r.TransDate)}</td>
-                    <td className="px-3 py-1.5 text-slate-600">{r.CustomerName || '-'}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{r.MobileNo || '-'}</td>
-                    <td className="max-w-xs truncate px-3 py-1.5 text-slate-500" title={r.ItemNames || ''}>{r.ItemNames || '-'}</td>
-                    <td className="px-3 py-1.5 text-right text-slate-600">{Number(r.TotalQty)}</td>
-                    <td className="px-3 py-1.5 text-right font-medium text-slate-700">{money(r.TotalAmount)}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex justify-end gap-1">
-                        <button type="button" className="btn-ghost px-2 py-1" title="Print bill" onClick={() => print(r)}><Printer size={15} /></button>
-                        <button type="button" className="btn-ghost px-2 py-1" title="Edit sale" onClick={() => navigate('/pharmacy/sales-billing', { state: { editSale: r } })}><Pencil size={15} /></button>
+                  <tr key={r.SalesBillingId}>
+                    <td className="ph-mid font-medium text-brand-700">{r.Code}</td>
+                    <td className="ph-mid">{dateLabel(r.TransDate)}</td>
+                    <td className="truncate" title={r.CustomerName || ''}>{r.CustomerName || '-'}</td>
+                    <td className="ph-mid">{r.MobileNo || '-'}</td>
+                    <td className="truncate text-ink-500" title={r.ItemNames || ''}>{r.ItemNames || '-'}</td>
+                    <td className="ph-num">{Number(r.TotalQty)}</td>
+                    <td className="ph-num font-medium text-ink-800">{money(r.TotalAmount)}</td>
+                    <td>
+                      <div className="flex justify-center gap-0.5">
+                        <button type="button" className="ph-icon" title="Print bill" onClick={() => print(r)}><Printer size={14} /></button>
+                        <button type="button" className="ph-icon" title="Edit sale" onClick={() => navigate('/pharmacy/sales-billing', { state: { editSale: r } })}><Pencil size={14} /></button>
                         {isAdmin && (
-                          <button type="button" className="btn-ghost px-2 py-1 text-red-500 hover:bg-red-50" title="Delete sale (Admin only)" onClick={() => remove(r)}><Trash2 size={15} /></button>
+                          <button type="button" className="ph-icon-del" title="Delete sale (Admin only)" onClick={() => remove(r)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={5} className="text-right">Total</td>
+                  <td className="ph-num">{Math.round(rows.reduce((s, r) => s + Number(r.TotalQty || 0), 0) * 100) / 100}</td>
+                  <td className="ph-num">{money(grandTotal)}</td>
+                  <td />
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}

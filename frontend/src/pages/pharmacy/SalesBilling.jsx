@@ -271,12 +271,12 @@ export default function SalesBilling() {
     }
   };
 
-  // Compact grid: one-line headings, short rows, light lines, and boxes that
-  // only show their border on hover / focus.
-  const cell = 'border-b border-r border-ink-100 px-1.5 py-0 align-middle';
-  const th = 'border-b border-r border-brand-100 px-1.5 py-1 text-[12px] font-semibold whitespace-nowrap';
-  const num = 'text-right tabular-nums';
-  const box = 'h-6 w-full rounded border border-transparent bg-transparent px-1 py-0 text-[13px] leading-6 hover:border-ink-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:hover:border-transparent';
+  // Shared Pharmacy grid look (index.css .ph-table / .ph-box): one-line
+  // headings, short rows, light lines, boxes that show a border on hover / focus.
+  const cell = '';
+  const th = '';
+  const num = 'ph-num';
+  const box = 'ph-box';
 
   return (
     <div>
@@ -316,11 +316,11 @@ export default function SalesBilling() {
             </div>
           </div>
 
-          <div className="mt-3 overflow-x-auto rounded-lg border border-ink-200 shadow-sm">
+          <div className="ph-wrap mt-3">
             {/* Fixed column shares (adding up to 100%) so every heading stays on one line. */}
-            <table className="w-full min-w-[1100px] table-fixed border-collapse text-left text-[13px]" {...gridKeys}>
+            <table className="ph-table min-w-[1100px]" {...gridKeys}>
               <thead>
-                <tr className="bg-gradient-to-b from-brand-50 to-brand-100/60 text-brand-800">
+                <tr>
                   <th className={`${th} w-[3%] text-center`}>#</th>
                   <th className={`${th} w-[15.5%]`}>Item Name</th>
                   <th className={`${th} w-[13.5%]`}>Batch</th>
@@ -334,7 +334,7 @@ export default function SalesBilling() {
                   <th className={`${th} w-[6%] text-right`}>Quantity</th>
                   <th className={`${th} w-[5.5%] text-right`} title="Discount on this row: Amount = Quantity × Sale Price less Disc%">Disc%</th>
                   <th className={`${th} w-[7%] text-right`} title="Quantity × Sale Price less Disc%">Amount</th>
-                  <th className={`${th} w-[4%] border-r-0`} />
+                  <th className="w-[4%]" />
                 </tr>
               </thead>
               <tbody>
@@ -343,7 +343,7 @@ export default function SalesBilling() {
                   const b = batchOfLine(l);
                   const problem = problemOf(l);
                   return (
-                    <tr key={l.key} className="transition-colors even:bg-slate-50/60 hover:bg-brand-50/40">
+                    <tr key={l.key}>
                       <td className={`${cell} text-center text-[12px] text-ink-400`}>{r + 1}</td>
                       <td className={cell}>
                         <SearchPick
@@ -418,9 +418,9 @@ export default function SalesBilling() {
                         {l.itemId ? money(amountOf(l)) : ''}
                         {problem?.amount && <p className="text-[11px] font-normal leading-tight text-red-600">{problem.amount}</p>}
                       </td>
-                      <td className={`${cell} border-r-0 !px-0.5`}>
+                      <td className="!px-0.5">
                         <div className="flex justify-center">
-                          {l.itemId && <button type="button" data-r={r} data-c={6} className="rounded p-0.5 text-red-500 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>}
+                          {l.itemId && <button type="button" data-r={r} data-c={6} className="ph-icon-del" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>}
                         </div>
                       </td>
                     </tr>
@@ -428,12 +428,12 @@ export default function SalesBilling() {
                 })}
               </tbody>
               <tfoot>
-                <tr className="text-ink-700">
+                <tr className="!bg-white font-normal text-ink-700 [&>td]:border-0">
                   <td className="px-2 pt-1 text-right text-[12px] text-ink-500" colSpan={12}>Sub Total</td>
                   <td className={`px-2 pt-1 ${num}`}>{money(subTotal)}</td>
                   <td />
                 </tr>
-                <tr className="text-ink-700">
+                <tr className="!bg-white font-normal text-ink-700 [&>td]:border-0">
                   <td className="px-2 py-0.5 text-right text-[12px] text-ink-500" colSpan={12}>
                     <span className="inline-flex items-center gap-1.5">
                       Bill Discount %
@@ -448,7 +448,7 @@ export default function SalesBilling() {
                   <td className={`px-2 py-0.5 ${num} ${discountAmount ? 'text-red-600' : 'text-ink-400'}`}>{discountAmount ? `− ${money(discountAmount)}` : money(0)}</td>
                   <td />
                 </tr>
-                <tr className="border-t border-brand-100 bg-brand-50/70 font-semibold text-ink-800">
+                <tr className="!bg-brand-50 font-semibold text-ink-800 [&>td]:border-x-0 [&>td]:border-brand-100">
                   <td className="px-2 py-1 text-right text-[12px] uppercase tracking-wide text-ink-500" colSpan={12}>
                     {belowCost && !filled.some((l) => problemOf(l)?.amount) && <span className="mr-3 normal-case tracking-normal text-red-600">Total is below the purchase cost {money(totalCost)} — lower the Bill Discount</span>}
                     Total
@@ -456,7 +456,7 @@ export default function SalesBilling() {
                   <td className={`px-2 py-1 ${num} text-[14px] font-bold ${belowCost ? 'text-red-600' : 'text-brand-800'}`}>{money(total)}</td>
                   <td />
                 </tr>
-                <tr className="text-ink-700">
+                <tr className="!bg-white font-normal text-ink-700 [&>td]:border-0">
                   <td className="px-2 py-0.5 text-right text-[12px] text-ink-500" colSpan={12}>
                     <label className="inline-flex cursor-pointer items-center gap-1.5" title="Round the Total to the nearest rupee">
                       <input type="checkbox" checked={roundOn} onChange={(e) => setRoundOn(e.target.checked)} /> Round Off
@@ -465,7 +465,7 @@ export default function SalesBilling() {
                   <td className={`px-2 py-0.5 ${num} ${roundOff < 0 ? 'text-red-600' : roundOff > 0 ? 'text-ink-700' : 'text-ink-400'}`}>{roundOff > 0 ? '+ ' : roundOff < 0 ? '− ' : ''}{money(Math.abs(roundOff))}</td>
                   <td />
                 </tr>
-                <tr className="border-t border-brand-100 bg-brand-50/70 font-semibold text-ink-800">
+                <tr className="!bg-brand-50 font-semibold text-ink-800 [&>td]:border-x-0 [&>td]:border-brand-100">
                   <td className="px-2 py-1 text-right text-[12px] uppercase tracking-wide text-ink-500" colSpan={12}>Net Amount</td>
                   <td className={`px-2 py-1 ${num} text-[15px] font-bold text-brand-800`}>{money(netAmount)}</td>
                   <td />

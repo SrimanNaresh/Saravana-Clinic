@@ -103,12 +103,13 @@ export default function ItemBulkUpdate() {
     setErrors({});
   };
 
-  const cellBox = 'w-full rounded border bg-transparent px-1.5 py-0.5 text-[13px] focus:bg-white focus:outline-none';
-  const cell = 'border border-ink-200 px-1 py-0.5';
+  // Shared Pharmacy grid look (index.css .ph-table / .ph-box).
+  const cellBox = 'ph-box';
+  const cell = 'px-1';
 
   const editor = (r, c, rIdx, cIdx) => {
     const changed = isChanged(r, c);
-    const cls = `${cellBox} ${changed ? 'border-amber-400 bg-amber-50 font-medium text-amber-900' : 'border-transparent focus:border-brand-400'}`;
+    const cls = `${cellBox} ${changed ? 'border-amber-400 bg-amber-50 font-medium text-amber-900' : ''}`;
     const common = { className: cls, 'data-r': rIdx, 'data-c': cIdx, value: valueOf(r, c), onChange: (e) => edit(r, c, e.target.value) };
     if (c.kind === 'list') {
       // A list can hold the same name twice (older data); show it once.
@@ -131,7 +132,7 @@ export default function ItemBulkUpdate() {
       );
     }
     if (c.kind === 'pack') return <input {...common} list="bulk-pack-values" />;
-    if (c.kind === 'number') return <input {...common} type="number" min="0" step="0.01" className={`${cls} no-spin text-right`} />;
+    if (c.kind === 'number') return <input {...common} type="number" min="0" step="0.01" className={`${cls} no-spin text-right tabular-nums`} />;
     return <input {...common} />;
   };
 
@@ -170,26 +171,29 @@ export default function ItemBulkUpdate() {
           <EmptyState message="No items found." />
         ) : (
           <>
+            {/* Item Code and Item Name stay pinned on the left, so this one scrolls sideways by design. */}
             <div className="max-h-[70vh] overflow-auto rounded-lg border border-ink-200">
-              <table className="w-max min-w-full border-collapse text-left text-[13px]" {...gridKeys}>
+              <table className="ph-table w-max min-w-full table-auto" {...gridKeys}>
                 <thead className="sticky top-0 z-20">
-                  <tr className="bg-brand-50 font-bold text-brand-700">
-                    <th className={`${cell} sticky left-0 z-30 w-[88px] min-w-[88px] bg-brand-50 px-2`}>Item Code</th>
-                    <th className={`${cell} sticky left-[88px] z-30 w-56 min-w-[14rem] bg-brand-50 px-2`}>Item Name</th>
-                    {COLS.map((c) => <th key={c.key} className={`${cell} ${c.w} px-2 ${c.kind === 'number' ? 'text-right' : ''}`}>{c.label}</th>)}
+                  <tr>
+                    <th className="ph-mid sticky left-0 z-30 w-[88px] min-w-[88px] px-2">Item Code</th>
+                    <th className="sticky left-[88px] z-30 w-56 min-w-[14rem] px-2">Item Name</th>
+                    {COLS.map((c) => <th key={c.key} className={`${c.w} px-2 ${c.kind === 'number' ? 'ph-num' : ''}`}>{c.label}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {shown.map((r, rIdx) => {
                     const err = errors[r.ItemId];
                     const changed = !!changes[r.ItemId];
-                    const tint = err ? 'bg-red-50' : changed ? 'bg-amber-50/60' : 'bg-white';
-                    // The pinned cells need a solid colour, or columns scrolled under them show through.
-                    const pinTint = err ? 'bg-red-50' : changed ? 'bg-amber-50' : 'bg-white';
+                    // Light stripe on every other row. The pinned cells need a solid colour,
+                    // or columns scrolled under them show through.
+                    const stripe = rIdx % 2 ? 'bg-slate-50' : 'bg-white';
+                    const tint = err ? 'bg-red-50' : changed ? 'bg-amber-50/60' : stripe;
+                    const pinTint = err ? 'bg-red-50' : changed ? 'bg-amber-50' : stripe;
                     return (
                       <tr key={r.ItemId} className={tint}>
-                        <td className={`${cell} sticky left-0 z-10 px-2 text-ink-500 ${pinTint}`}>{r.ItemCode}</td>
-                        <td className={`${cell} sticky left-[88px] z-10 px-2 font-medium ${pinTint} ${err ? 'text-red-700' : 'text-ink-800'}`} title={err || ''}>
+                        <td className={`ph-mid sticky left-0 z-10 px-2 text-ink-500 ${pinTint}`}>{r.ItemCode}</td>
+                        <td className={`sticky left-[88px] z-10 px-2 font-medium ${pinTint} ${err ? 'text-red-700' : 'text-ink-800'}`} title={err || ''}>
                           {r.Name}
                           {err && <p className="text-[11px] font-normal text-red-600">{err}</p>}
                         </td>

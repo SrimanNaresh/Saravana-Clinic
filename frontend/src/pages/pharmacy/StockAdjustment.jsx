@@ -136,9 +136,10 @@ export default function StockAdjustment() {
     }
   };
 
-  const cell = 'border border-ink-200 px-1 py-0.5';
-  const box = 'w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] focus:border-brand-400 focus:bg-white focus:outline-none';
-  const num = `${box} no-spin text-right`;
+  // Shared Pharmacy grid look (index.css .ph-table / .ph-box).
+  const cell = '';
+  const box = 'ph-box';
+  const num = `${box} no-spin text-right tabular-nums`;
 
   return (
     <div>
@@ -162,20 +163,21 @@ export default function StockAdjustment() {
             </div>
           </div>
 
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[880px] border-collapse text-left text-[13px]" {...gridKeys}>
+          <div className="ph-wrap mt-3">
+            <table className="ph-table min-w-[880px]" {...gridKeys}>
+              <colgroup><col className="w-[3%]" /><col className="w-[27%]" /><col className="w-[13%]" /><col className="w-[8%]" /><col className="w-[8%]" /><col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[5%]" /></colgroup>
               <thead>
-                <tr className="bg-brand-50 font-bold text-brand-700">
-                  <th className={`${cell} w-8 px-1.5 text-center`}>#</th>
-                  <th className={`${cell} min-w-[220px] px-1.5`}>Item Name</th>
-                  <th className={`${cell} w-36 px-1.5`}>Batch</th>
-                  <th className={`${cell} w-20 px-1.5 text-right`}>Cur Stock</th>
-                  <th className={`${cell} w-24 px-1.5 text-right`}>MRP</th>
-                  <th className={`${cell} w-24 bg-emerald-50 px-1.5 text-right text-emerald-700`}>Adjust In</th>
-                  <th className={`${cell} w-24 bg-emerald-50 px-1.5 text-right text-emerald-700`}>Price</th>
-                  <th className={`${cell} w-24 bg-red-50 px-1.5 text-right text-red-700`}>Adjust Out</th>
-                  <th className={`${cell} w-24 bg-red-50 px-1.5 text-right text-red-700`}>Price</th>
-                  <th className={`${cell} w-8`} />
+                <tr>
+                  <th className="ph-mid">#</th>
+                  <th>Item Name</th>
+                  <th>Batch</th>
+                  <th className="ph-num">Cur Stock</th>
+                  <th className="ph-num">MRP</th>
+                  <th className="ph-num bg-emerald-50 text-emerald-700">Adjust In</th>
+                  <th className="ph-num bg-emerald-50 text-emerald-700">Price</th>
+                  <th className="ph-num bg-red-50 text-red-700">Adjust Out</th>
+                  <th className="ph-num bg-red-50 text-red-700">Price</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -185,7 +187,7 @@ export default function StockAdjustment() {
                   const listId = `adj-batches-${r.key}`;
                   return (
                     <tr key={r.key} title={p || ''}>
-                      <td className={`${cell} px-1.5 text-center text-ink-400`}>{i + 1}</td>
+                      <td className="ph-mid text-[12px] text-ink-400">{i + 1}</td>
                       <td className={cell}>
                         <SearchPick className={box} placeholder="Search item..." options={itemOptions} value={r.itemId} data-r={i} data-c={0} onChange={(v) => pickItem(r.key, v)} />
                         {p && <p className="px-1 text-[11px] text-red-600">{p}</p>}
@@ -200,7 +202,7 @@ export default function StockAdjustment() {
                         </datalist>
                         {isNew && r.batch && <p className="px-1 text-[11px] text-emerald-700">New batch</p>}
                       </td>
-                      <td className={`${cell} px-1.5 text-right font-medium text-ink-700`}>{r.itemId ? round2(curOf(r)) : ''}</td>
+                      <td className="ph-num font-medium text-ink-700">{r.itemId ? round2(curOf(r)) : ''}</td>
                       <td className={cell}>
                         <input type="number" min="0" step="any" className={num} data-r={i} data-c={2} disabled={!r.itemId} value={r.mrp} onChange={(e) => setRow(r.key, { mrp: e.target.value })} />
                       </td>
@@ -221,17 +223,17 @@ export default function StockAdjustment() {
                         <input type="number" min="0" step="any" className={num} data-r={i} data-c={6} disabled={!r.itemId || Number(r.inQty) > 0} value={r.outPrice} onChange={(e) => setRow(r.key, { outPrice: e.target.value })} />
                       </td>
                       <td className={`${cell} text-center`}>
-                        {r.itemId && <button type="button" className="rounded p-0.5 text-red-500 hover:bg-red-50" title="Delete row" onClick={() => removeRow(r.key)}><Trash2 size={13} /></button>}
+                        {r.itemId && <button type="button" className="ph-icon-del" title="Delete row" onClick={() => removeRow(r.key)}><Trash2 size={13} /></button>}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
               <tfoot>
-                <tr className="bg-ink-50 font-semibold">
-                  <td className={`${cell} px-2 text-right`} colSpan={5}>Total value</td>
-                  <td className={`${cell} px-1.5 text-right text-emerald-700`} colSpan={2}>In ₹{money(inTotal)}</td>
-                  <td className={`${cell} px-1.5 text-right text-red-700`} colSpan={2}>Out ₹{money(outTotal)}</td>
+                <tr>
+                  <td className="text-right" colSpan={5}>Total value</td>
+                  <td className="ph-num text-emerald-700" colSpan={2}>In ₹{money(inTotal)}</td>
+                  <td className="ph-num text-red-700" colSpan={2}>Out ₹{money(outTotal)}</td>
                   <td className={cell} />
                 </tr>
               </tfoot>

@@ -77,6 +77,61 @@
   .section-title {
     @apply text-xs font-semibold uppercase tracking-wider text-ink-400;
   }
+
+  /* ---- Pharmacy tables (docs/Pharmacy-Module-Prompt.md, "General rules") ----
+     Short 28px rows, one-line headings on a tinted header row, light grid
+     lines, a light stripe on every other row and a soft hover colour. Fixed
+     layout so <colgroup> shares (adding up to 100%) fit the screen.
+     Cell rules use :where() so they carry no extra weight: a utility on a
+     cell (text-right, w-…, bg-…, px-…) still wins over them. */
+  .ph-table {
+    @apply w-full table-fixed border-collapse text-left text-[13px] text-ink-700;
+  }
+  :where(.ph-table) th {
+    @apply h-7 whitespace-nowrap border border-brand-100 bg-brand-50 px-1.5 py-1 align-middle text-[12px] font-semibold leading-tight text-ink-700;
+  }
+  :where(.ph-table) td {
+    @apply h-7 border border-ink-100 px-1.5 py-0 align-middle;
+  }
+  /* Row rules are wholly inside :where() (no weight at all), so a row's own
+     colour (e.g. red for a row with a problem) still shows. */
+  :where(.ph-table > tbody > tr) {
+    @apply transition-colors;
+  }
+  :where(.ph-table > tbody > tr:nth-child(even)) {
+    @apply bg-slate-50/70;
+  }
+  :where(.ph-table > tbody > tr:hover) {
+    @apply bg-brand-50/50;
+  }
+  :where(.ph-table > tfoot > tr) {
+    @apply bg-ink-50 font-semibold text-ink-800;
+  }
+  :where(.ph-table) > tfoot td {
+    @apply border-ink-200;
+  }
+  /* Cell alignment: numbers right with even digits, codes / dates centred. */
+  .ph-num {
+    @apply text-right tabular-nums;
+  }
+  .ph-mid {
+    @apply text-center;
+  }
+  /* The wrapper: scrolls sideways only below the table's minimum width. */
+  .ph-wrap {
+    @apply overflow-x-auto;
+  }
+  /* A box inside an editable grid: plain text until hovered or focused. */
+  .ph-box {
+    @apply h-6 w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0 text-[13px] leading-6 transition-colors hover:border-ink-200 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:text-ink-400 disabled:hover:border-transparent;
+  }
+  /* Small icon buttons in a row (edit / print / delete). */
+  .ph-icon {
+    @apply inline-flex h-6 w-6 items-center justify-center rounded text-ink-500 transition-colors hover:bg-ink-100 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300;
+  }
+  .ph-icon-del {
+    @apply ph-icon text-red-500 hover:bg-red-50 hover:text-red-600 focus-visible:ring-red-300;
+  }
   /* Scrollable but no visible scrollbar track/thumb — used where the scroll
      affordance itself (not a visible bar) is enough, e.g. the top nav bar. */
   .no-scrollbar {

@@ -64,32 +64,33 @@ export default function VendorList() {
         ) : rows.length === 0 ? (
           <EmptyState message="No vendors found." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="ph-wrap">
+            <table className="ph-table min-w-[800px]">
+              <colgroup><col className="w-[24%]" /><col className="w-[17%]" /><col className="w-[12%]" /><col className="w-[14%]" /><col className="w-[16%]" /><col className="w-[8%]" /><col className="w-[9%]" /></colgroup>
               <thead>
-                <tr className="table-head">
-                  <th className="rounded-l-lg px-3 py-2">Vendor name</th>
-                  <th className="px-3 py-2">Contact person</th>
-                  <th className="px-3 py-2">Mobile No</th>
-                  <th className="px-3 py-2">State</th>
-                  <th className="px-3 py-2">GSTIN</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="rounded-r-lg px-3 py-2 text-right">Edit</th>
+                <tr>
+                  <th>Vendor name</th>
+                  <th>Contact person</th>
+                  <th className="ph-mid">Mobile No</th>
+                  <th>State</th>
+                  <th className="ph-mid">GSTIN</th>
+                  <th className="ph-mid">Status</th>
+                  <th className="ph-mid">Edit</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.VendorId} className="table-row">
-                    <td className="px-3 py-1.5 font-medium text-slate-700">{r.VendorName}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{r.ContactPerson || '-'}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{r.ContactNo || '-'}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{r.State || '-'}</td>
-                    <td className="px-3 py-1.5 text-slate-500">{r.GSTNo || '-'}</td>
-                    <td className="px-3 py-1.5">
+                  <tr key={r.VendorId}>
+                    <td className="font-medium text-ink-700 truncate">{r.VendorName}</td>
+                    <td className="text-ink-500">{r.ContactPerson || '-'}</td>
+                    <td className="text-ink-500 ph-mid">{r.ContactNo || '-'}</td>
+                    <td className="text-ink-500">{r.State || '-'}</td>
+                    <td className="text-ink-500 ph-mid">{r.GSTNo || '-'}</td>
+                    <td className="ph-mid">
                       <span className={r.Status === 'Inactive' ? 'text-slate-400' : 'text-emerald-600'}>{r.Status || 'Active'}</span>
                     </td>
-                    <td className="px-3 py-1.5 text-right">
-                      <button type="button" className="btn-ghost px-2 py-1" title="Edit vendor" onClick={() => editRow(r)}><Pencil size={15} /></button>
+                    <td className="ph-num">
+                      <button type="button" className="ph-icon" title="Edit vendor" onClick={() => editRow(r)}><Pencil size={14} /></button>
                     </td>
                   </tr>
                 ))}
