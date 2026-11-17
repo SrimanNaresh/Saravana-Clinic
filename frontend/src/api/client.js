@@ -102,6 +102,8 @@ export const clinicApi = {
   save: (data) => api.put('/clinic', data).then((r) => r.data),
   remove: () => api.delete('/clinic').then((r) => r.data),
   saveLetterPad: (data) => api.put('/clinic/letter-pad', data).then((r) => r.data),
+  // { gstin, drugLicenceNo, stateName } for the Pharmacy GST invoice
+  saveGst: (data) => api.put('/clinic/gst', data).then((r) => r.data),
 };
 
 export const pharmacyApi = {
@@ -236,6 +238,8 @@ export const pharmacyReportApi = {
   expiry: (params) => api.get('/pharmacy-reports/expiry', { params }).then((r) => r.data),
   // params: { category, all: '1' to include never-stocked items }
   lowStock: (params) => api.get('/pharmacy-reports/low-stock', { params }).then((r) => r.data),
+  // params: { from, to } as YYYY-MM-DD
+  gstSummary: (params) => api.get('/pharmacy-reports/gst-summary', { params }).then((r) => r.data),
   // params: { from, to } as YYYY-MM-DD; either may be blank
   vendorPayments: (params) => api.get('/pharmacy-reports/vendor-payments', { params }).then((r) => r.data),
   vendorDocs: (vendorId, params) => api.get(`/pharmacy-reports/vendor-payments/${vendorId}`, { params }).then((r) => r.data),

@@ -63,3 +63,35 @@ export function saleBill(amounts, discPercent) {
   const discountAmount = round2((subTotal * num(discPercent)) / 100);
   return { subTotal, discountAmount, total: round2(subTotal - discountAmount) };
 }
+
+// GST on a sale (docs/saravana_pharmacy_db.md §6). Prices are GST-inclusive.
+// Each line's Net = its Amount less its share of the Bill Discount (the last
+// line takes the rounding, so the Nets add up to Sub Total − Discount);
+// Taxable = Net ÷ (1 + GST% / 100); CGST is half the GST, SGST the rest.
+// Round Off is not taxed. lines: [{ amount, gstPercent }].
+//   e.g. Net 112.00 at 12 % -> Taxable 100.00, CGST 6.00, SGST 6.00
+export function saleGst(lines, discPercent) {
+  const amounts = lines.map((l) => num(l.amount));
+  const { subTotal, discountAmount } = saleBill(amounts, discPercent);
+  let left = round2(subTotal - discountAmount);
+  const out = lines.map((l, i) => {
+    const net = i === lines.length - 1 ? left : round2(num(l.amount) * (1 - num(discPercent) / 100));
+    left = round2(left - net);
+    const g = num(l.gstPercent);
+    const taxable = round2(net / (1 + g / 100));
+    const cgst = round2((net - taxable) / 2);
+    return { netAmount: net, gstPercent: g, taxableAmount: taxable, cgstAmount: cgst, sgstAmount: round2(net - taxable - cgst), igstAmount: 0 };
+  });
+  const sum = (k) => round2(out.reduce((s, l) => s + l[k], 0));
+  return { lines: out, taxableAmount: sum('taxableAmount'), cgstAmount: sum('cgstAmount'), sgstAmount: sum('sgstAmount'), igstAmount: 0 };
+}
+
+// GST on returned quantity of a sale line: the same share of what the sale
+// line stored (so a full return gives back exactly its GST).
+export function returnGst(saleLine, share) {
+  const s = Math.min(Math.max(num(share), 0), 1);
+  const net = round2(num(saleLine.NetAmount) * s);
+  const taxable = round2(num(saleLine.TaxableAmount) * s);
+  const cgst = round2(num(saleLine.CGSTAmount) * s);
+  return { netAmount: net, gstPercent: saleLine.GSTPercent == null ? null : num(saleLine.GSTPercent), taxableAmount: taxable, cgstAmount: cgst, sgstAmount: round2(net - taxable - cgst), igstAmount: 0 };
+}

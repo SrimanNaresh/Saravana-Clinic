@@ -4,10 +4,11 @@ import { PageHeader, Toast, Spinner, EmptyState, Modal, CardHeader } from '../..
 import { useToast } from '../../hooks/useToast.js';
 import { clinicApi, pharmacyApi } from '../../api/client.js';
 import { isValidText, isValidNumeric, isValidEmail } from '../../utils/validators.js';
+import { INDIAN_STATES } from '../../utils/indianStates.js';
 
 const emptyForm = {
   name: '', doctorName: '', logo: '', address: '', email: '', contactNo: '',
-  pageHeight: '', pageWidth: '', appName: '',
+  pageHeight: '', pageWidth: '', appName: '', gstin: '', drugLicenceNo: '', stateName: '',
 };
 const toForm = (data) => data ? {
   name: data.Name ?? data.name ?? '',
@@ -19,6 +20,9 @@ const toForm = (data) => data ? {
   pageHeight: data.PageHeight ?? data.pageHeight ?? '',
   pageWidth: data.PageWidth ?? data.pageWidth ?? '',
   appName: data.AppName ?? data.appName ?? '',
+  gstin: data.GSTIN ?? '',
+  drugLicenceNo: data.DrugLicenceNo ?? '',
+  stateName: data.StateName ?? '',
 } : { ...emptyForm };
 
 const emptyPharmacy = { name: '', address: '', contactNo: '' };
@@ -54,6 +58,7 @@ export default function ClinicDetails() {
     if (!isValidText(form.appName)) return show('App Name must contain letters only', 'error');
     if (!isValidEmail(form.email)) return show('Enter a valid email address', 'error');
     if (!isValidNumeric(form.contactNo)) return show('Contact No must contain numbers only', 'error');
+    if (form.gstin.trim() && !/^[0-9]{2}[A-Za-z0-9]{13}$/.test(form.gstin.trim())) return show('GSTIN must be 15 characters: 2 digits, then letters / digits', 'error');
     setSaving(true);
     try {
       const saved = await clinicApi.save({
@@ -61,7 +66,9 @@ export default function ClinicDetails() {
         pageHeight: form.pageHeight ? Number(Number(form.pageHeight).toFixed(2)) : null,
         pageWidth: form.pageWidth ? Number(Number(form.pageWidth).toFixed(2)) : null,
       });
-      setSavedClinic(saved);
+      // GSTIN / DL No / State go through their own route (Pharmacy GST invoice).
+      const gst = await clinicApi.saveGst({ gstin: form.gstin, drugLicenceNo: form.drugLicenceNo, stateName: form.stateName });
+      setSavedClinic({ ...saved, ...gst });
       show('Clinic details saved', 'success');
     } catch (err) {
       show(err.response?.data?.error || 'Save failed', 'error');
@@ -219,6 +226,28 @@ export default function ClinicDetails() {
             <label className="label"><AppWindow size={13} className="mb-0.5 inline" /> App Name</label>
             <p className="mb-3 text-xs text-ink-400">Used only when installing this app to a device's home screen (the name shown there and while downloading). It does not change the "Ayush Pro" product name shown in the sidebar or sign-in screen. Leave blank to use "Ayush Pro".</p>
             <input className="input max-w-sm" value={form.appName} onChange={update('appName')} placeholder="e.g. Ayush Pro" />
+          </div>
+
+          <div className="mt-5 border-t border-ink-100 pt-4">
+            <label className="label">Pharmacy GST Invoice</label>
+            <p className="mb-3 text-xs text-ink-400">Printed on the Pharmacy's A4 GST Invoice. Leave blank if the clinic has no GST registration.</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div>
+                <label className="label">GSTIN</label>
+                <input className="input uppercase" maxLength={15} value={form.gstin} onChange={(e) => setForm((c) => ({ ...c, gstin: e.target.value.toUpperCase() }))} placeholder="e.g. 33ABCDE1234F1Z5" />
+              </div>
+              <div>
+                <label className="label">Drug Licence No</label>
+                <input className="input" maxLength={100} value={form.drugLicenceNo} onChange={update('drugLicenceNo')} placeholder="e.g. 20B-123, 21B-124" />
+              </div>
+              <div>
+                <label className="label">State</label>
+                <select className="input" value={form.stateName} onChange={update('stateName')}>
+                  <option value="">Select state...</option>
+                  {INDIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
 
           <div className="mt-5 border-t border-ink-100 pt-4">

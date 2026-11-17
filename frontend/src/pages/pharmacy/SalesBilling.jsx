@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Receipt, Trash2, Save, X, List, Printer } from 'lucide-react';
 import { CardHeader, Toast } from '../../components/ui.jsx';
-import SalesBillReceipt from './SalesBillReceipt.jsx';
+import SalesBillReceipt, { billFromSale, usePrintFormat, PrintFormatPick } from './SalesBillReceipt.jsx';
+import SalesGstInvoice from './SalesGstInvoice.jsx';
 import SearchPick from '../../components/grid/SearchPick.jsx';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
@@ -43,6 +44,7 @@ export default function SalesBilling() {
   const [clinic, setClinic] = useState(null);
   // The bill just saved, offered for printing above the form.
   const [printBill, setPrintBill] = useState(null);
+  const [printFormat, setPrintFormat] = usePrintFormat();
   // Save & Print: print once the saved bill's receipt is in the page; after an
   // edit, go back to the list when the print dialog closes.
   const [printNow, setPrintNow] = useState(null); // null | { then?: () => void }
@@ -239,28 +241,21 @@ export default function SalesBilling() {
         transDate, customerName, mobileNo, discPercent: Number(billDisc) || 0, roundOff: roundOn,
         items: filled.map((l) => ({ itemId: Number(l.itemId), batch: l.batch, saleUnit: l.saleUnit, quantity: Number(l.qty), rate: Number(l.price), discPercent: Number(l.disc) || 0 })),
       };
-      const billOf = (saved) => ({
-        code: saved.Code, transDate, customerName,
-        lines: filled.map((l) => ({
-          itemName: `${itemById.get(l.itemId)?.Name || ''}${l.saleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.batch,
-          qty: Number(l.qty), rate: Number(l.price), disc: Number(l.disc) || 0, amount: amountOf(l),
-        })),
-        subTotal, discPercent: Number(billDisc) || 0, discountAmount, roundOff,
-        total: Number(saved.TotalAmount),
-      });
+      // The printout is built from the bill as saved (with its stored GST).
+      const billOf = async (saved) => billFromSale(await salesBillingApi.get(saved.SalesBillingId));
       const toList = () => navigate('/pharmacy/sales-billing-list', { state: { flash: 'Sale updated' } });
       if (editingId) {
         const saved = await salesBillingApi.update(editingId, payload);
         batchCache.current.clear();
         if (print) {
-          setPrintBill(billOf(saved));
+          setPrintBill(await billOf(saved));
           setPrintNow({ then: toList });
         } else toList();
       } else {
         const saved = await salesBillingApi.create(payload);
         batchCache.current.clear();
         show(`Saved ${saved.Code}`, 'success');
-        setPrintBill(billOf(saved));
+        setPrintBill(await billOf(saved));
         if (print) setPrintNow({});
         resetForm();
       }
@@ -296,6 +291,7 @@ export default function SalesBilling() {
           {printBill && (
             <div className="mb-2 flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm">
               <span>Saved <b>{printBill.code}</b> · {printBill.customerName} · ₹{money(printBill.total)}</span>
+              <PrintFormatPick value={printFormat} onChange={setPrintFormat} />
               <button type="button" className="btn-secondary py-1" onClick={() => window.print()}><Printer size={14} /> Print</button>
               <button type="button" className="ml-auto text-ink-400 hover:text-ink-600" title="Close" onClick={() => setPrintBill(null)}><X size={16} /></button>
             </div>
@@ -481,6 +477,7 @@ export default function SalesBilling() {
             <button type="button" className="btn-secondary" onClick={() => (editingId ? navigate('/pharmacy/sales-billing-list') : resetForm())}>
               <X size={16} /> Cancel
             </button>
+            <PrintFormatPick value={printFormat} onChange={setPrintFormat} />
             <button type="button" className="btn-secondary" disabled={saving || hasProblem} title="Save the bill and print it" onClick={(e) => save(e, true)}>
               <Printer size={16} /> {editingId ? 'Update & Print' : 'Save & Print'}
             </button>
@@ -491,7 +488,7 @@ export default function SalesBilling() {
         </form>
       </div>
 
-      <SalesBillReceipt clinic={clinic} bill={printBill} />
+      {printFormat === 'invoice' ? <SalesGstInvoice clinic={clinic} sale={printBill?.sale} /> : <SalesBillReceipt clinic={clinic} bill={printBill} />}
 
       <Toast toast={toast} />
     </div>

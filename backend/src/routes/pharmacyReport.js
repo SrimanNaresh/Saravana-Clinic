@@ -141,6 +141,69 @@ router.get('/low-stock', async (req, res) => {
   }
 });
 
+// GST / HSN Summary for a period (?from, ?to as YYYY-MM-DD; default this
+// month): outward supplies = sale lines less sales-return lines, read from the
+// GST stored on each line (never recalculated). Lines saved before GST was
+// recorded are counted apart as "not recorded".
+router.get('/gst-summary', async (req, res) => {
+  try {
+    const now = new Date();
+    const first = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const from = dateOrNull(req.query.from) || first;
+    const to = dateOrNull(req.query.to) || now.toISOString().slice(0, 10);
+    const pool = await getPool();
+    const r = await pool.request().input('from', sql.Date, from).input('to', sql.Date, to).query(`
+      WITH L AS (
+        SELECT l.HSNCode, l.GSTPercent, l.Quantity AS Qty, l.TaxableAmount, l.CGSTAmount, l.SGSTAmount, l.IGSTAmount,
+               ISNULL(l.NetAmount, l.Amount) AS Net, h.SalesBillingId AS BillId, 1 AS Sign
+        FROM SalesBillingItem l JOIN SalesBilling h ON h.SalesBillingId = l.SalesBillingId AND h.IsActive = 1
+        WHERE h.TransDate BETWEEN @from AND @to
+        UNION ALL
+        SELECT l.HSNCode, l.GSTPercent, -l.Quantity, -l.TaxableAmount, -l.CGSTAmount, -l.SGSTAmount, -l.IGSTAmount,
+               -ISNULL(l.NetAmount, l.Amount), NULL, -1
+        FROM SalesReturnItem l JOIN SalesReturn h ON h.SalesReturnId = l.SalesReturnId AND h.IsActive = 1
+        WHERE h.TransDate BETWEEN @from AND @to
+      )
+      SELECT ISNULL(NULLIF(HSNCode, ''), '(no HSN)') AS HSN, GSTPercent, SUM(Qty) AS Qty, SUM(TaxableAmount) AS Taxable,
+             SUM(CGSTAmount) AS CGST, SUM(SGSTAmount) AS SGST, SUM(IGSTAmount) AS IGST, SUM(Net) AS Total
+      FROM L WHERE GSTPercent IS NOT NULL
+      GROUP BY ISNULL(NULLIF(HSNCode, ''), '(no HSN)'), GSTPercent
+      ORDER BY HSN, GSTPercent;
+
+      WITH L AS (
+        SELECT l.HSNCode, l.GSTPercent, l.Quantity AS Qty, l.TaxableAmount, l.CGSTAmount, l.SGSTAmount, l.IGSTAmount,
+               ISNULL(l.NetAmount, l.Amount) AS Net, h.SalesBillingId AS BillId, 1 AS Sign
+        FROM SalesBillingItem l JOIN SalesBilling h ON h.SalesBillingId = l.SalesBillingId AND h.IsActive = 1
+        WHERE h.TransDate BETWEEN @from AND @to
+        UNION ALL
+        SELECT l.HSNCode, l.GSTPercent, -l.Quantity, -l.TaxableAmount, -l.CGSTAmount, -l.SGSTAmount, -l.IGSTAmount,
+               -ISNULL(l.NetAmount, l.Amount), NULL, -1
+        FROM SalesReturnItem l JOIN SalesReturn h ON h.SalesReturnId = l.SalesReturnId AND h.IsActive = 1
+        WHERE h.TransDate BETWEEN @from AND @to
+      )
+      SELECT COUNT(DISTINCT BillId) AS Bills, ISNULL(SUM(Net), 0) AS Amount FROM L WHERE GSTPercent IS NULL;
+    `);
+    const num = (v) => Number(v || 0);
+    const hsn = r.recordsets[0].map((x) => ({
+      HSN: x.HSN, GSTPercent: num(x.GSTPercent), Qty: num(x.Qty), Taxable: num(x.Taxable), CGST: num(x.CGST),
+      SGST: num(x.SGST), IGST: num(x.IGST), Total: num(x.Total),
+    }));
+    const rates = new Map();
+    for (const x of hsn) {
+      const t = rates.get(x.GSTPercent) || { GSTPercent: x.GSTPercent, Taxable: 0, CGST: 0, SGST: 0, IGST: 0, Total: 0 };
+      for (const k of ['Taxable', 'CGST', 'SGST', 'IGST', 'Total']) t[k] = Math.round((t[k] + x[k]) * 100) / 100;
+      rates.set(x.GSTPercent, t);
+    }
+    const nr = r.recordsets[1][0];
+    res.json({
+      from, to, hsn, rates: [...rates.values()].sort((a, b) => a.GSTPercent - b.GSTPercent),
+      notRecorded: { bills: nr.Bills, amount: num(nr.Amount) },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // One item's stock history, oldest first, with the stock after each change.
 router.get('/stock/:itemId/history', async (req, res) => {
   try {

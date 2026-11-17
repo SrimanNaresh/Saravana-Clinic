@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { batchStock } from '../utils/batchStock.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
-import { unitsPerPack, saleLineAmount, saleBill, roundOffOf } from '../utils/purchaseCalc.js';
+import { unitsPerPack, saleLineAmount, saleBill, saleGst, roundOffOf } from '../utils/purchaseCalc.js';
 
 // Pharmacy > Sales: counter sales, each line sold from one batch, by the Pack
 // or by the Unit (one piece; price and quantity per piece). Stock is never
@@ -65,7 +65,8 @@ router.get('/batches/:itemId', async (req, res) => {
 const LINES_SQL = `
   SELECT l.LineId, l.ItemId, i.Name AS ItemName, l.Batch, l.ExpiryDate, l.Quantity, l.Rate, l.Amount, ISNULL(l.DiscPercent, 0) AS DiscPercent,
          ISNULL(l.SaleUnit, 'pack') AS SaleUnit, ISNULL(l.UnitQty, l.Quantity) AS UnitQty, ISNULL(l.PackSize, 1) AS PackSize,
-         i.Rack, i.BoxNo, i.MRP, i.SellPrice, i.Pack
+         i.Rack, i.BoxNo, i.MRP, i.SellPrice, i.Pack,
+         l.HSNCode, l.GSTPercent, l.NetAmount, l.TaxableAmount, l.CGSTAmount, l.SGSTAmount, l.IGSTAmount
   FROM SalesBillingItem l
   JOIN PharmacyItem i ON i.ItemId = l.ItemId
   WHERE l.SalesBillingId = @id
@@ -87,7 +88,8 @@ router.get('/:id', async (req, res) => {
     const pool = await getPool();
     const head = await pool.request().input('id', sql.Int, req.params.id).query(`
       SELECT h.SalesBillingId, ${CODE} AS Code, h.TransDate, h.CustomerName, h.MobileNo, h.TotalAmount,
-             ISNULL(h.SubTotal, h.TotalAmount) AS SubTotal, ISNULL(h.DiscPercent, 0) AS DiscPercent, ISNULL(h.DiscountAmount, 0) AS DiscountAmount, h.RoundOff
+             ISNULL(h.SubTotal, h.TotalAmount) AS SubTotal, ISNULL(h.DiscPercent, 0) AS DiscPercent, ISNULL(h.DiscountAmount, 0) AS DiscountAmount, h.RoundOff,
+             h.TaxableAmount, h.CGSTAmount, h.SGSTAmount, h.IGSTAmount
       FROM SalesBilling h WHERE h.SalesBillingId = @id AND h.IsActive = 1
     `);
     if (!head.recordset.length) return res.status(404).json({ error: 'Sale not found' });
@@ -102,7 +104,7 @@ router.get('/:id', async (req, res) => {
 // { transDate, customerName, mobileNo, lines, subTotal, discPercent, discountAmount, total }. Amounts are worked out
 // here, never taken from the screen. Runs inside the save's transaction so
 // the stock it checks can't change before the save.
-async function checkSale(tx, body, saleId) {
+export async function checkSale(tx, body, saleId) {
   const transDate = String(body.transDate || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(transDate) || Number.isNaN(Date.parse(transDate))) return { error: 'Date is required' };
   const customerName = String(body.customerName || '').trim();
@@ -120,7 +122,8 @@ async function checkSale(tx, body, saleId) {
   if (itemIds.length) {
     const found = await new sql.Request(tx)
       .input('ids', sql.NVarChar(sql.MAX), [...new Set(itemIds)].join(','))
-      .query(`SELECT i.ItemId, i.Name, i.MRP, i.PurchaseRate, i.Pack, u.Name AS UnitName FROM PharmacyItem i
+      .query(`SELECT i.ItemId, i.Name, i.MRP, i.PurchaseRate, i.Pack, u.Name AS UnitName, i.HSNCode,
+                     ISNULL(i.GSTPercent, ISNULL(i.CGSTPercent, 0) + ISNULL(i.SGSTPercent, 0)) AS GSTPercent FROM PharmacyItem i
               LEFT JOIN UnitMaster u ON u.UnitId = i.UnitId
               WHERE i.IsActive = 1 AND i.ItemId IN (SELECT CAST(value AS INT) FROM STRING_SPLIT(@ids, ','))`);
     for (const r of found.recordset) items.set(r.ItemId, r);
@@ -161,7 +164,7 @@ async function checkSale(tx, body, saleId) {
     }
     lines.push({
       itemId: item.ItemId, batch: batch || null, expiryDate: b.ExpiryDate, qty: packs, rate: round2(price), discPercent: disc, amount, cost,
-      saleUnit, unitQty: qty, packSize: size,
+      saleUnit, unitQty: qty, packSize: size, hsnCode: item.HSNCode || null, gstPercent: Number(item.GSTPercent || 0),
     });
   }
   const discPercent = body.discPercent === '' || body.discPercent == null ? 0 : Number(body.discPercent);
@@ -172,7 +175,10 @@ async function checkSale(tx, body, saleId) {
   // body.roundOff: true rounds the Total to the nearest rupee. The cost check
   // above is on the Total before it, so rounding down by up to 0.50 is allowed.
   const roundOff = body.roundOff ? roundOffOf(bill.total) : 0;
-  return { transDate, customerName, mobileNo: mobileNo || null, lines, discPercent, ...bill, roundOff, total: round2(bill.total + roundOff) };
+  // GST is worked out here from the item's GST % today and saved on each line.
+  const gst = saleGst(lines, discPercent);
+  lines.forEach((l, i) => Object.assign(l, gst.lines[i]));
+  return { transDate, customerName, mobileNo: mobileNo || null, lines, discPercent, ...bill, roundOff, total: round2(bill.total + roundOff), gst };
 }
 
 async function insertLines(tx, saleId, lines) {
@@ -189,8 +195,17 @@ async function insertLines(tx, saleId, lines) {
       .input('saleUnit', sql.NVarChar(10), l.saleUnit)
       .input('unitQty', sql.Decimal(10, 2), l.unitQty)
       .input('packSize', sql.Int, l.packSize)
-      .query(`INSERT INTO SalesBillingItem (SalesBillingId, ItemId, Quantity, Rate, DiscPercent, Amount, Batch, ExpiryDate, SaleUnit, UnitQty, PackSize)
-              VALUES (@id, @itemId, @qty, @rate, @disc, @amount, @batch, @expiry, @saleUnit, @unitQty, @packSize)`);
+      .input('hsn', sql.NVarChar(30), l.hsnCode)
+      .input('gstP', sql.Decimal(5, 2), l.gstPercent)
+      .input('net', sql.Decimal(12, 2), l.netAmount)
+      .input('taxable', sql.Decimal(12, 2), l.taxableAmount)
+      .input('cgst', sql.Decimal(12, 2), l.cgstAmount)
+      .input('sgst', sql.Decimal(12, 2), l.sgstAmount)
+      .input('igst', sql.Decimal(12, 2), l.igstAmount)
+      .query(`INSERT INTO SalesBillingItem (SalesBillingId, ItemId, Quantity, Rate, DiscPercent, Amount, Batch, ExpiryDate, SaleUnit, UnitQty, PackSize,
+                                            HSNCode, GSTPercent, NetAmount, TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount)
+              VALUES (@id, @itemId, @qty, @rate, @disc, @amount, @batch, @expiry, @saleUnit, @unitQty, @packSize,
+                      @hsn, @gstP, @net, @taxable, @cgst, @sgst, @igst)`);
   }
 }
 
@@ -227,12 +242,17 @@ async function saveSale(req, res, saleId) {
       .input('disc', sql.Decimal(5, 2), sale.discPercent)
       .input('discAmt', sql.Decimal(12, 2), sale.discountAmount)
       .input('total', sql.Decimal(12, 2), sale.total)
-      .input('roundOff', sql.Decimal(10, 2), sale.roundOff);
+      .input('roundOff', sql.Decimal(10, 2), sale.roundOff)
+      .input('taxable', sql.Decimal(12, 2), sale.gst.taxableAmount)
+      .input('cgst', sql.Decimal(12, 2), sale.gst.cgstAmount)
+      .input('sgst', sql.Decimal(12, 2), sale.gst.sgstAmount)
+      .input('igst', sql.Decimal(12, 2), sale.gst.igstAmount);
     let id = saleId;
     if (saleId) {
       const upd = await head.input('id', sql.Int, saleId).query(`
         UPDATE SalesBilling SET TransDate = @transDate, CustomerName = @customer, MobileNo = @mobile, TotalAmount = @total,
-            SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt, RoundOff = @roundOff
+            SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt, RoundOff = @roundOff,
+            TaxableAmount = @taxable, CGSTAmount = @cgst, SGSTAmount = @sgst, IGSTAmount = @igst
         WHERE SalesBillingId = @id AND IsActive = 1`);
       if (!upd.rowsAffected[0]) {
         await tx.rollback();
@@ -241,9 +261,10 @@ async function saveSale(req, res, saleId) {
       await new sql.Request(tx).input('id', sql.Int, saleId).query('DELETE FROM SalesBillingItem WHERE SalesBillingId = @id');
     } else {
       const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null).query(`
-        INSERT INTO SalesBilling (TransDate, CustomerName, MobileNo, TotalAmount, SubTotal, DiscPercent, DiscountAmount, RoundOff, CreatedBy)
+        INSERT INTO SalesBilling (TransDate, CustomerName, MobileNo, TotalAmount, SubTotal, DiscPercent, DiscountAmount, RoundOff, CreatedBy,
+                                  TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount)
         OUTPUT INSERTED.SalesBillingId
-        VALUES (@transDate, @customer, @mobile, @total, @subTotal, @disc, @discAmt, @roundOff, @by)`);
+        VALUES (@transDate, @customer, @mobile, @total, @subTotal, @disc, @discAmt, @roundOff, @by, @taxable, @cgst, @sgst, @igst)`);
       id = ins.recordset[0].SalesBillingId;
     }
     await insertLines(tx, id, sale.lines);

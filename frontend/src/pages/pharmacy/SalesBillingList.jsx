@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Receipt, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react';
 import { CardHeader, Spinner, EmptyState, Toast } from '../../components/ui.jsx';
 import { useToast } from '../../hooks/useToast.js';
-import SalesBillReceipt from './SalesBillReceipt.jsx';
+import SalesBillReceipt, { billFromSale, usePrintFormat, PrintFormatPick } from './SalesBillReceipt.jsx';
+import SalesGstInvoice from './SalesGstInvoice.jsx';
 import { salesBillingApi, clinicApi } from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 
@@ -25,6 +26,7 @@ export default function SalesBillingList() {
   const [search, setSearch] = useState('');
   const [clinic, setClinic] = useState(null);
   const [printBill, setPrintBill] = useState(null);
+  const [printFormat, setPrintFormat] = usePrintFormat();
 
   useEffect(() => { clinicApi.get().then(setClinic).catch(() => setClinic(null)); }, []);
 
@@ -61,16 +63,7 @@ export default function SalesBillingList() {
 
   const print = async (row) => {
     try {
-      const sale = await salesBillingApi.get(row.SalesBillingId);
-      setPrintBill({
-        code: sale.Code, transDate: sale.TransDate, customerName: sale.CustomerName,
-        lines: sale.lines.map((l) => ({
-          itemName: `${l.ItemName}${l.SaleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.Batch,
-          qty: Number(l.UnitQty), rate: Number(l.Rate), disc: Number(l.DiscPercent) || 0, amount: Number(l.Amount),
-        })),
-        subTotal: Number(sale.SubTotal), discPercent: Number(sale.DiscPercent) || 0, discountAmount: Number(sale.DiscountAmount) || 0, roundOff: Number(sale.RoundOff) || 0,
-        total: Number(sale.TotalAmount),
-      });
+      setPrintBill(billFromSale(await salesBillingApi.get(row.SalesBillingId)));
     } catch {
       show('Failed to load sale for printing', 'error');
     }
@@ -98,6 +91,7 @@ export default function SalesBillingList() {
           subtitle={`${rows.length} sale(s) · Total ₹${money(grandTotal)}`}
           actions={
             <>
+              <PrintFormatPick value={printFormat} onChange={setPrintFormat} />
               <div className="relative w-full sm:w-72">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
                 <input className="input pl-9" placeholder="Customer, mobile, sale no, item..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -167,7 +161,7 @@ export default function SalesBillingList() {
         )}
       </div>
 
-      <SalesBillReceipt clinic={clinic} bill={printBill} />
+      {printFormat === 'invoice' ? <SalesGstInvoice clinic={clinic} sale={printBill?.sale} /> : <SalesBillReceipt clinic={clinic} bill={printBill} />}
       <Toast toast={toast} />
     </div>
   );

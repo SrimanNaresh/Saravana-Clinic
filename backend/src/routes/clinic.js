@@ -44,6 +44,31 @@ router.put('/', async (req, res) => {
   }
 });
 
+// Pharmacy GST invoice details: GSTIN, Drug Licence No and State. Its own
+// partial update (like the letter pad) so it never touches the other fields.
+const GSTIN = /^[0-9]{2}[A-Z0-9]{13}$/;
+router.put('/gst', async (req, res) => {
+  try {
+    const gstin = String(req.body?.gstin ?? '').trim().toUpperCase();
+    const dl = String(req.body?.drugLicenceNo ?? '').trim();
+    const state = String(req.body?.stateName ?? '').trim();
+    if (gstin && !GSTIN.test(gstin)) return res.status(400).json({ error: 'GSTIN must be 15 characters: 2 digits, then letters / digits' });
+    if (dl.length > 100) return res.status(400).json({ error: 'Drug Licence No must be at most 100 characters' });
+    if (state.length > 60) return res.status(400).json({ error: 'State must be at most 60 characters' });
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('gstin', sql.NVarChar(15), gstin || null)
+      .input('dl', sql.NVarChar(100), dl || null)
+      .input('state', sql.NVarChar(60), state || null)
+      .query(`UPDATE ClinicDetails SET GSTIN = @gstin, DrugLicenceNo = @dl, StateName = @state, UpdatedAt = GETDATE()
+              OUTPUT INSERTED.GSTIN, INSERTED.DrugLicenceNo, INSERTED.StateName WHERE ClinicId = 1`);
+    if (!r.recordset.length) return res.status(400).json({ error: 'Save the Clinic Master first' });
+    res.json(r.recordset[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Letter-pad template: the uploaded letterhead image + its print size + the
 // saved drag-and-drop parameter positions. A dedicated partial-update route
 // (unlike PUT /) so saving the template never requires resending the whole

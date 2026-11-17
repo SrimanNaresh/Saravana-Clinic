@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getPool, sql } from '../db/pool.js';
 import { docNo, docNoSql } from '../utils/docNumber.js';
-import { saleLineAmount, saleBill } from '../utils/purchaseCalc.js';
+import { saleLineAmount, saleBill, saleGst } from '../utils/purchaseCalc.js';
 import { batchStock } from '../utils/batchStock.js';
 
 // Pharmacy > Return > Sales Return: goods a customer brings back from one
@@ -69,6 +69,7 @@ async function saleLines(request, saleId, excludeReturnId) {
   const r = await request.input('saleId', sql.Int, saleId).input('exclude', sql.Int, excludeReturnId || null).query(`
     SELECT l.LineId AS SalesLineId, l.ItemId, i.Name AS ItemName, l.Batch, l.ExpiryDate, l.Rate, ISNULL(l.DiscPercent, 0) AS DiscPercent,
            ISNULL(l.SaleUnit, 'pack') AS SaleUnit, ISNULL(l.UnitQty, l.Quantity) AS Sold, ISNULL(l.PackSize, 1) AS PackSize,
+           l.HSNCode, l.GSTPercent,
            ISNULL((SELECT SUM(ri.UnitQty) FROM SalesReturnItem ri JOIN SalesReturn rh ON rh.SalesReturnId = ri.SalesReturnId AND rh.IsActive = 1
                    WHERE ri.SalesLineId = l.LineId AND (@exclude IS NULL OR rh.SalesReturnId <> @exclude)), 0) AS Returned
     FROM SalesBillingItem l JOIN PharmacyItem i ON i.ItemId = l.ItemId
@@ -152,7 +153,7 @@ const linesOf = async (tx, returnId) => (await new sql.Request(tx).input('rid', 
 
 // Checks a return body against the sale. Returns { error } or the cleaned
 // return; amounts are worked out here, never taken from the screen.
-async function checkReturn(tx, body, returnId) {
+export async function checkReturn(tx, body, returnId) {
   const returnDate = text(body.returnDate).slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(returnDate) || Number.isNaN(Date.parse(returnDate))) return { error: 'Return Date is required' };
   const saleId = Number(body.salesBillingId);
@@ -174,11 +175,20 @@ async function checkReturn(tx, body, returnId) {
       salesLineId: s.SalesLineId, itemId: s.ItemId, batch: s.Batch, expiryDate: s.ExpiryDate, saleUnit: s.SaleUnit, packSize: s.PackSize,
       unitQty: qty, qty: round4(qty / (s.SaleUnit === 'unit' ? s.PackSize : 1)), rate: s.Rate, discPercent: s.DiscPercent,
       amount: saleLineAmount({ quantity: qty, rate: s.Rate, discPercent: s.DiscPercent }),
+      hsnCode: s.HSNCode || null, gstPercent: s.GSTPercent == null ? null : Number(s.GSTPercent),
     });
   }
   if (!lines.length) return { error: 'Enter a Return Qty on at least one line' };
   const discPercent = Number(sale.DiscPercent) || 0;
-  return { returnDate, sale, lines, discPercent, ...saleBill(lines.map((l) => l.amount), discPercent) };
+  // GST at the sale line's GST %, split the same way as on a sale. Lines of
+  // bills saved before GST was recorded (no GST %) stay without GST.
+  const g = saleGst(lines.map((l) => ({ amount: l.amount, gstPercent: l.gstPercent ?? 0 })), discPercent);
+  const none = { netAmount: null, taxableAmount: null, cgstAmount: null, sgstAmount: null, igstAmount: null };
+  lines.forEach((l, i) => Object.assign(l, l.gstPercent == null ? { ...none, netAmount: g.lines[i].netAmount } : g.lines[i], { gstPercent: l.gstPercent }));
+  const recorded = lines.filter((l) => l.gstPercent != null);
+  const sum = (k) => (recorded.length ? round2(recorded.reduce((t, l) => t + l[k], 0)) : null);
+  const gst = { taxableAmount: sum('taxableAmount'), cgstAmount: sum('cgstAmount'), sgstAmount: sum('sgstAmount'), igstAmount: recorded.length ? 0 : null };
+  return { returnDate, sale, lines, discPercent, ...saleBill(lines.map((l) => l.amount), discPercent), gst };
 }
 
 async function saveReturn(req, res, returnId) {
@@ -193,20 +203,24 @@ async function saveReturn(req, res, returnId) {
       .input('date', sql.Date, r.returnDate).input('saleId', sql.Int, r.sale.SalesBillingId)
       .input('customer', sql.NVarChar(200), r.sale.CustomerName).input('mobile', sql.NVarChar(20), r.sale.MobileNo)
       .input('subTotal', sql.Decimal(12, 2), r.subTotal).input('disc', sql.Decimal(5, 2), r.discPercent)
-      .input('discAmt', sql.Decimal(12, 2), r.discountAmount).input('total', sql.Decimal(12, 2), r.total);
+      .input('discAmt', sql.Decimal(12, 2), r.discountAmount).input('total', sql.Decimal(12, 2), r.total)
+      .input('taxable', sql.Decimal(12, 2), r.gst.taxableAmount).input('cgst', sql.Decimal(12, 2), r.gst.cgstAmount)
+      .input('sgst', sql.Decimal(12, 2), r.gst.sgstAmount).input('igst', sql.Decimal(12, 2), r.gst.igstAmount);
     let id = returnId;
     const before = returnId ? await linesOf(tx, returnId) : [];
     if (returnId) {
       const upd = await head.input('id', sql.Int, returnId).query(`
         UPDATE SalesReturn SET TransDate = @date, SalesBillingId = @saleId, CustomerName = @customer, MobileNo = @mobile,
-            SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt, TotalAmount = @total
+            SubTotal = @subTotal, DiscPercent = @disc, DiscountAmount = @discAmt, TotalAmount = @total,
+            TaxableAmount = @taxable, CGSTAmount = @cgst, SGSTAmount = @sgst, IGSTAmount = @igst
         WHERE SalesReturnId = @id AND IsActive = 1`);
       if (!upd.rowsAffected[0]) { await tx.rollback(); return res.status(404).json({ error: 'Sales Return not found' }); }
       await new sql.Request(tx).input('id', sql.Int, returnId).query('DELETE FROM SalesReturnItem WHERE SalesReturnId = @id');
     } else {
       const ins = await head.input('by', sql.NVarChar(100), req.user?.username || null).query(`
-        INSERT INTO SalesReturn (TransDate, SalesBillingId, CustomerName, MobileNo, SubTotal, DiscPercent, DiscountAmount, TotalAmount, CreatedBy)
-        OUTPUT INSERTED.SalesReturnId VALUES (@date, @saleId, @customer, @mobile, @subTotal, @disc, @discAmt, @total, @by)`);
+        INSERT INTO SalesReturn (TransDate, SalesBillingId, CustomerName, MobileNo, SubTotal, DiscPercent, DiscountAmount, TotalAmount, CreatedBy,
+                                 TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount)
+        OUTPUT INSERTED.SalesReturnId VALUES (@date, @saleId, @customer, @mobile, @subTotal, @disc, @discAmt, @total, @by, @taxable, @cgst, @sgst, @igst)`);
       id = ins.recordset[0].SalesReturnId;
     }
     for (const l of r.lines) {
@@ -216,8 +230,13 @@ async function saveReturn(req, res, returnId) {
         .input('saleUnit', sql.NVarChar(10), l.saleUnit).input('unitQty', sql.Decimal(10, 2), l.unitQty).input('packSize', sql.Int, l.packSize)
         .input('qty', sql.Decimal(12, 4), l.qty).input('rate', sql.Decimal(10, 2), l.rate)
         .input('disc', sql.Decimal(5, 2), l.discPercent).input('amount', sql.Decimal(12, 2), l.amount)
-        .query(`INSERT INTO SalesReturnItem (SalesReturnId, SalesLineId, ItemId, Batch, ExpiryDate, SaleUnit, UnitQty, PackSize, Quantity, Rate, DiscPercent, Amount)
-                VALUES (@id, @lineId, @itemId, @batch, @expiry, @saleUnit, @unitQty, @packSize, @qty, @rate, @disc, @amount)`);
+        .input('hsn', sql.NVarChar(30), l.hsnCode).input('gstP', sql.Decimal(5, 2), l.gstPercent).input('net', sql.Decimal(12, 2), l.netAmount)
+        .input('taxable', sql.Decimal(12, 2), l.taxableAmount).input('cgst', sql.Decimal(12, 2), l.cgstAmount)
+        .input('sgst', sql.Decimal(12, 2), l.sgstAmount).input('igst', sql.Decimal(12, 2), l.igstAmount)
+        .query(`INSERT INTO SalesReturnItem (SalesReturnId, SalesLineId, ItemId, Batch, ExpiryDate, SaleUnit, UnitQty, PackSize, Quantity, Rate, DiscPercent, Amount,
+                                             HSNCode, GSTPercent, NetAmount, TaxableAmount, CGSTAmount, SGSTAmount, IGSTAmount)
+                VALUES (@id, @lineId, @itemId, @batch, @expiry, @saleUnit, @unitQty, @packSize, @qty, @rate, @disc, @amount,
+                        @hsn, @gstP, @net, @taxable, @cgst, @sgst, @igst)`);
     }
     const short = before.length ? await shortBatch(tx, before) : null;
     if (short) { await tx.rollback(); return res.status(400).json({ error: short }); }

@@ -1,4 +1,39 @@
+import { useState } from 'react';
 import { PrescriptionPageSize } from '../../components/PrescriptionLetterhead.jsx';
+
+// The receipt's data from a saved sale (salesBillingApi.get), so a print
+// always shows what was saved. `sale` is kept for the A4 GST Invoice.
+export const billFromSale = (sale) => ({
+  code: sale.Code, transDate: sale.TransDate, customerName: sale.CustomerName,
+  lines: sale.lines.map((l) => ({
+    itemName: `${l.ItemName}${l.SaleUnit === 'unit' ? ' (unit)' : ''}`, batch: l.Batch,
+    qty: Number(l.UnitQty), rate: Number(l.Rate), disc: Number(l.DiscPercent) || 0, amount: Number(l.Amount),
+  })),
+  subTotal: Number(sale.SubTotal), discPercent: Number(sale.DiscPercent) || 0, discountAmount: Number(sale.DiscountAmount) || 0,
+  roundOff: Number(sale.RoundOff) || 0, total: Number(sale.TotalAmount), sale,
+});
+
+// Receipt or A4 GST Invoice, remembered on this computer.
+const FORMAT_KEY = 'pharmacy.salesPrintFormat';
+export function usePrintFormat() {
+  const [format, setFormat] = useState(() => {
+    try { return localStorage.getItem(FORMAT_KEY) === 'invoice' ? 'invoice' : 'receipt'; } catch { return 'receipt'; }
+  });
+  const choose = (f) => {
+    setFormat(f);
+    try { localStorage.setItem(FORMAT_KEY, f); } catch { /* private window: just this visit */ }
+  };
+  return [format, choose];
+}
+
+export function PrintFormatPick({ value, onChange, className = '' }) {
+  return (
+    <select className={`input w-auto py-1 ${className}`} value={value} onChange={(e) => onChange(e.target.value)} title="What Print prints">
+      <option value="receipt">Print: Receipt</option>
+      <option value="invoice">Print: GST Invoice (A4)</option>
+    </select>
+  );
+}
 
 // Printable sales bill receipt — shared by the Sales Billing entry page (print
 // right after Save) and the Sales Billing List page (reprint any past sale).

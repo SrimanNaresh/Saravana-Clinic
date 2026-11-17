@@ -89,6 +89,7 @@ export const MENU_GROUPS = [
           { key: 'pharmacy.all-in-one-report', label: 'All in One', to: '/pharmacy/all-in-one-report' },
           { key: 'pharmacy.expiry-report', label: 'Expiry', to: '/pharmacy/expiry-report' },
           { key: 'pharmacy.low-stock', label: 'Low Stock', to: '/pharmacy/low-stock' },
+          { key: 'pharmacy.gst-summary', label: 'GST / HSN Summary', to: '/pharmacy/gst-summary' },
         ],
       },
     ],
