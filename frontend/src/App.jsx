@@ -53,6 +53,7 @@ import StockReport from './pages/pharmacy/StockReport.jsx';
 import AllInOneReport from './pages/pharmacy/AllInOneReport.jsx';
 import VendorPayments from './pages/pharmacy/VendorPayments.jsx';
 import VendorPaymentEntry from './pages/pharmacy/VendorPaymentEntry.jsx';
+import StockIps from './pages/pharmacy/StockIps.jsx';
 import PharmacyDashboard from './pages/pharmacy/PharmacyDashboard.jsx';
 import CreditLedger from './pages/pharmacy/CreditLedger.jsx';
 import GstSummaryReport from './pages/pharmacy/GstSummaryReport.jsx';
@@ -193,6 +194,7 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/stock-report" element={<StockReport />} />
               <Route path="/pharmacy/vendor-payments" element={<VendorPayments />} />
               <Route path="/pharmacy/all-in-one-report" element={<AllInOneReport />} />
+              <Route path="/pharmacy/stock-ips" element={<StockIps />} />
               <Route path="/pharmacy/dashboard" element={<PharmacyDashboard />} />
               <Route path="/pharmacy/credit-ledger" element={<CreditLedger />} />
               <Route path="/pharmacy/gst-summary" element={<GstSummaryReport />} />

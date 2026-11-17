@@ -62,6 +62,7 @@ export const MENU_GROUPS = [
         submenu: [
           { key: 'pharmacy.stock-inward', label: 'Master', to: '/pharmacy/stock-in' },
           { key: 'pharmacy.stock-inward-list', label: 'List', to: '/pharmacy/stock-in-list' },
+          { key: 'pharmacy.stock-ips', label: 'Three in One', to: '/pharmacy/stock-ips' },
           { key: 'pharmacy.stock-adjustment', label: 'Adjustment', to: '/pharmacy/stock-adjustment' },
           { key: 'pharmacy.stock-adjustment-list', label: 'Adjustment List', to: '/pharmacy/stock-adjustment-list' },
         ],
