@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Receipt, Plus, Trash2, Save, X, List, Printer } from 'lucide-react';
+import { Receipt, Trash2, Save, X, List, Printer } from 'lucide-react';
 import { CardHeader, Toast } from '../../components/ui.jsx';
 import SalesBillReceipt from './SalesBillReceipt.jsx';
 import SearchPick from '../../components/grid/SearchPick.jsx';
@@ -62,7 +62,11 @@ export default function SalesBilling() {
   const itemById = useMemo(() => new Map(catalog.map((i) => [String(i.ItemId), i])), [catalog]);
   const itemOptions = useMemo(() => catalog.map((i) => ({ value: String(i.ItemId), label: i.Name })), [catalog]);
 
-  const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const setLine = (key, patch) => setLines((ls) => {
+    const next = ls.map((l) => (l.key === key ? { ...l, ...patch } : l));
+    // Always keep one empty row at the end to type the next item into.
+    return next[next.length - 1].itemId ? [...next, emptyLine()] : next;
+  });
   // Where the cursor goes after the next render: { key, c } = that row's box
   // in column c (0 Item Name, 5 Quantity).
   const [focusAt, setFocusAt] = useState(null);
@@ -75,24 +79,17 @@ export default function SalesBilling() {
     try { el.select(); } catch { /* not selectable */ }
     setFocusAt(null);
   }, [focusAt, lines]);
-  // A row added with + gets the cursor in its Item Name box.
-  const addLineAfter = (key) => {
-    const added = emptyLine();
-    setLines((ls) => {
-      const i = ls.findIndex((l) => l.key === key);
-      return [...ls.slice(0, i + 1), added, ...ls.slice(i + 1)];
-    });
-    setFocusAt({ key: added.key, c: 0 });
-  };
-  // Enter on a row: on to the next empty row's Item Name, adding one if needed.
+  // Enter on a row: on to the next empty row's Item Name (the last row is always empty).
   const nextItem = (key) => {
     const i = lines.findIndex((l) => l.key === key);
-    const after = lines[i + 1];
-    if (after && !after.itemId) setFocusAt({ key: after.key, c: 0 });
-    else addLineAfter(key);
+    const empty = lines.slice(i + 1).find((l) => !l.itemId);
+    if (empty) setFocusAt({ key: empty.key, c: 0 });
   };
   const enterTo = (go) => (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
-  const removeLine = (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : [emptyLine()]));
+  const removeLine = (key) => setLines((ls) => {
+    const next = ls.filter((l) => l.key !== key);
+    return next.length && !next[next.length - 1].itemId ? next : [...next, emptyLine()];
+  });
 
   const defaultPrice = (item) => item?.SellPrice ?? item?.MRP ?? '';
 
@@ -214,7 +211,7 @@ export default function SalesBilling() {
       setMobileNo(sale.MobileNo || '');
       setBillDisc(Number(sale.DiscPercent) ? String(Number(sale.DiscPercent)) : '');
       setRoundOn(Number(sale.RoundOff) !== 0);
-      setLines(built.length ? built : [emptyLine()]);
+      setLines([...built, emptyLine()]);
     } catch {
       show('Failed to load sale for editing', 'error');
     }
@@ -423,8 +420,7 @@ export default function SalesBilling() {
                       </td>
                       <td className={`${cell} border-r-0 !px-0.5`}>
                         <div className="flex justify-center">
-                          <button type="button" data-r={r} data-c={6} className="rounded p-0.5 text-brand-600 hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300" title="Add a row below" onClick={() => addLineAfter(l.key)}><Plus size={14} /></button>
-                          <button type="button" data-r={r} data-c={7} className="rounded p-0.5 text-red-500 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>
+                          {l.itemId && <button type="button" data-r={r} data-c={6} className="rounded p-0.5 text-red-500 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300" title="Delete row" onClick={() => removeLine(l.key)}><Trash2 size={14} /></button>}
                         </div>
                       </td>
                     </tr>

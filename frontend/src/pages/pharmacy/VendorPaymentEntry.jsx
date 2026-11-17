@@ -63,12 +63,14 @@ export default function VendorPaymentEntry() {
 
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: String(v.VendorId), label: v.VendorName })), [vendors]);
   const invoiceOptions = useMemo(() => {
+    // "TA-SI0001 + B-123" so the vendor's Bill No shows and can be searched too.
+    const invLabel = (i) => (i.BillNo ? `${i.InvoiceNo} + ${i.BillNo}` : i.InvoiceNo);
     const opts = invoices.map((i) => ({
-      value: String(i.StockInId), label: i.InvoiceNo,
+      value: String(i.StockInId), label: invLabel(i),
       hint: `${dateLabel(i.InDate)}${vendorId ? '' : ` · ${i.VendorName}`} · ${i.Balance > 0 ? `Bal ₹${money(i.Balance)}` : 'Paid'}`,
     }));
     // Keep the chosen invoice pickable even once it's fully paid and drops off the list.
-    if (inv && !opts.some((o) => o.value === String(inv.StockInId))) opts.push({ value: String(inv.StockInId), label: inv.InvoiceNo, hint: 'Paid' });
+    if (inv && !opts.some((o) => o.value === String(inv.StockInId))) opts.push({ value: String(inv.StockInId), label: invLabel(inv), hint: 'Paid' });
     return opts;
   }, [invoices, vendorId, inv]);
 
@@ -146,7 +148,7 @@ export default function VendorPaymentEntry() {
           </div>
           <div className="w-80">
             <label className="label">Invoice No *</label>
-            <SearchPick className="input" placeholder={invoices.length ? 'Search invoice no...' : 'No unpaid invoices'} options={invoiceOptions} keepOrder value={invoiceId} onChange={pickInvoice} />
+            <SearchPick className="input" placeholder={invoices.length ? 'Search invoice no / bill no...' : 'No unpaid invoices'} options={invoiceOptions} keepOrder value={invoiceId} onChange={pickInvoice} />
           </div>
           <label className="mb-2 flex items-center gap-1.5 text-sm text-ink-600">
             <input type="checkbox" checked={showPaid} onChange={(e) => setShowPaid(e.target.checked)} /> Show paid invoices
@@ -170,6 +172,7 @@ export default function VendorPaymentEntry() {
           <>
             <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 rounded-lg bg-ink-50 px-3 py-2 text-sm">
               <span><span className="text-ink-500">Invoice No:</span> <b className="text-brand-700">{inv.InvoiceNo}</b></span>
+              <span><span className="text-ink-500">Bill No:</span> <b>{inv.BillNo || '—'}</b></span>
               <span><span className="text-ink-500">Date:</span> {dateLabel(inv.InDate)}</span>
               <span><span className="text-ink-500">Vendor:</span> <b>{inv.VendorName}</b></span>
               <span><span className="text-ink-500">Purchase No:</span> {inv.OrderNo}</span>

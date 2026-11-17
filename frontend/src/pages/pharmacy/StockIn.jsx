@@ -106,6 +106,7 @@ export default function StockIn() {
   const [orders, setOrders] = useState([]);
   const [orderId, setOrderId] = useState('');
   const [inDate, setInDate] = useState(today());
+  const [billNo, setBillNo] = useState('');
   const [rows, setRows] = useState([]);
   // Each arrow opens its own column: Amount › shows P.Rate + Disc% in its
   // place, GST Amt › shows GST% + CGST% + SGST%; the ‹ on the last of them closes it.
@@ -168,6 +169,7 @@ export default function StockIn() {
       setEditing({ id: s.StockInId, no: s.StockInNo, locked: s.locked });
       setVendorId(String(s.VendorId));
       setInDate(String(s.InDate).slice(0, 10));
+      setBillNo(s.BillNo || '');
       await loadOrders(String(s.VendorId), s.PurchaseOrderId);
       setOrderId(String(s.PurchaseOrderId));
       await loadLines(s.PurchaseOrderId, s);
@@ -192,7 +194,7 @@ export default function StockIn() {
   const hasProblem = problems.some(Boolean);
   const receiving = rows.filter((r) => Number(r.qty || 0) > 0 || Number(r.free || 0) > 0);
 
-  const reset = () => { setEditing(null); setVendorId(''); setOrders([]); setOrderId(''); setRows([]); setInDate(today()); setFill(emptyFill); };
+  const reset = () => { setEditing(null); setVendorId(''); setOrders([]); setOrderId(''); setRows([]); setInDate(today()); setBillNo(''); setFill(emptyFill); };
 
   const save = async (e) => {
     e.preventDefault();
@@ -204,7 +206,7 @@ export default function StockIn() {
     setSaving(true);
     try {
       const body = {
-        vendorId: Number(vendorId), purchaseOrderId: Number(orderId), inDate,
+        vendorId: Number(vendorId), purchaseOrderId: Number(orderId), inDate, billNo: billNo.trim(),
         lines: rows.map((r) => ({ poLineId: r.PoLineId, batchNo: r.batchNo, mfgMonth: r.mfg, expMonth: r.exp, quantity: r.qty, freeQty: r.free, discPercent: r.disc })),
       };
       if (editing) {
@@ -286,6 +288,10 @@ export default function StockIn() {
             <div>
               <label className="label">Date *</label>
               <input type="date" className="input" value={inDate} onChange={(e) => setInDate(e.target.value)} />
+            </div>
+            <div className="w-full sm:w-44">
+              <label className="label">Bill No</label>
+              <input className="input" maxLength={50} placeholder="Vendor's bill no" value={billNo} onChange={(e) => setBillNo(e.target.value)} />
             </div>
           </div>
 

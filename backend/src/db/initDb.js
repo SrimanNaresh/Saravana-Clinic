@@ -770,6 +770,10 @@ CREATE TABLE StockInItem (
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='FreeQty' AND Object_ID=Object_ID('StockInItem'))
     ALTER TABLE StockInItem ADD FreeQty DECIMAL(10,2) NOT NULL DEFAULT 0;
 
+-- The vendor's own bill / invoice number for a Stock In (optional).
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE Name='BillNo' AND Object_ID=Object_ID('StockIn'))
+    ALTER TABLE StockIn ADD BillNo NVARCHAR(50) NULL;
+
 -- Pharmacy > Return: goods sent back to the vendor from one Stock In.
 -- Lowers stock (read from these rows). Batch and dates are copied from the
 -- Stock In line. Number: SC-RT0001 from the id.

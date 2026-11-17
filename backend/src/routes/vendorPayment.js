@@ -17,7 +17,7 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // One row per active Stock In with its Total, Returns, Paid and Balance.
 const INVOICES = `
-  SELECT h.StockInId, ${SI_NO} AS InvoiceNo, h.InDate, h.VendorId, v.VendorName, h.PurchaseOrderId,
+  SELECT h.StockInId, ${SI_NO} AS InvoiceNo, h.InDate, h.BillNo, h.VendorId, v.VendorName, h.PurchaseOrderId,
          ${docNoSql('PO', 'h.PurchaseOrderId')} AS OrderNo,
          ISNULL((SELECT SUM(a + ROUND(a * g / 100, 2)) FROM (
            SELECT ROUND(l.Quantity * l.Rate, 2) AS a, ISNULL(pol.CGSTPercent, 0) + ISNULL(pol.SGSTPercent, 0) AS g
