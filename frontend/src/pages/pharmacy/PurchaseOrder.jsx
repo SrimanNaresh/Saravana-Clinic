@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingCart, Plus, Trash2, Save, X, List, ChevronRight, ChevronLeft, ListPlus, Search } from 'lucide-react';
+import { ShoppingCart, Plus, Trash2, Save, X, List, ChevronRight, ChevronLeft, ListPlus, Search, ScanLine } from 'lucide-react';
 import { CardHeader, Toast } from '../../components/ui.jsx';
 import SearchPick from '../../components/grid/SearchPick.jsx';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 import { useToast } from '../../hooks/useToast.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import ItemFormModal from './ItemFormModal.jsx';
+import ScanBillModal from './ScanBillModal.jsx';
 import { itemMasterApi, purchaseOrderApi, vendorApi } from '../../api/client.js';
 import { purchaseLine, purchaseTotal, roundOffOf } from '../../utils/purchaseCalc.js';
 
@@ -73,6 +74,7 @@ export default function PurchaseOrder() {
   const navigate = useNavigate();
   const { toast, show } = useToast();
   const [items, setItems] = useState([]);
+  const [scanOpen, setScanOpen] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [vendorId, setVendorId] = useState('');
   const [details, setDetails] = useState('');
@@ -235,6 +237,41 @@ export default function PurchaseOrder() {
     setBulk(null);
   };
 
+  // Scan Bill: the bill's lines (items already in, or just added to, Item
+  // Master) go on the order with the bill's Qty, MRP, P.Rate, Free, Disc % and
+  // GST % where its columns were read. An item already on the order is skipped.
+  const addScanned = async (scanned) => {
+    let list = items;
+    try {
+      list = await itemMasterApi.list({ status: 'Active' });
+      setItems(list);
+    } catch {
+      show('Failed to reload items', 'error');
+    }
+    const byId = new Map(list.map((i) => [String(i.ItemId), i]));
+    const have = new Set(lines.filter((l) => l.itemId).map((l) => l.itemId));
+    const given = (v) => v != null && String(v).trim() !== '' && Number(v) >= 0;
+    const fresh = [];
+    let already = 0;
+    for (const s of scanned) {
+      const it = byId.get(String(s.itemId));
+      if (!it) continue;
+      if (have.has(String(it.ItemId))) { already += 1; continue; }
+      have.add(String(it.ItemId));
+      const line = lineFromItem(it);
+      if (Number(s.qty) > 0) line.qty = numStr(s.qty);
+      if (given(s.mrp)) line.mrp = numStr(s.mrp);
+      if (given(s.pRate) && Number(s.pRate) > 0) line.pRate = numStr(s.pRate);
+      if (given(s.free)) line.free = numStr(s.free);
+      if (given(s.disc) && Number(s.disc) <= 100) line.disc = numStr(s.disc);
+      if (given(s.gst) && Number(s.gst) <= MAX_GST) Object.assign(line, splitGst(numStr(s.gst)));
+      fresh.push(line);
+    }
+    if (fresh.length) setLines((ls) => [...ls.filter((l) => l.itemId), ...fresh]);
+    setScanOpen(false);
+    show(`${fresh.length} line(s) added from the bill${already ? ` · ${already} already on the order` : ''}`, fresh.length ? 'success' : 'info');
+  };
+
   const filled = lines.filter((l) => l.itemId);
   const problems = new Map(filled.map((l) => [l.key, lineProblem(l)]).filter(([, p]) => p));
   const total = purchaseTotal(filled.map((l) => ({ pRate: l.pRate, discPercent: l.disc, quantity: l.qty, cgstPercent: l.cgst, sgstPercent: l.sgst })));
@@ -348,9 +385,14 @@ export default function PurchaseOrder() {
           )}
 
           <div className="mt-3 flex items-center justify-between">
+            <div>
             <button type="button" className="btn-secondary py-1" onClick={() => setBulk(bulk ? null : { search: '', category: '', manufacturer: '', ticked: new Set() })}>
               <ListPlus size={15} /> Bulk add items
             </button>
+            <button type="button" className="btn-secondary ml-2 py-1" onClick={() => setScanOpen(true)} title="Read a supplier's bill and put its items on this order" disabled={!!editing?.locked}>
+              <ScanLine size={15} /> Scan Bill
+            </button>
+            </div>
             <span className="text-xs text-ink-400">← → move between boxes · ↑ ↓ move between rows</span>
           </div>
 
@@ -510,6 +552,7 @@ export default function PurchaseOrder() {
           </div>
         </form>
       </div>
+      <ScanBillModal open={scanOpen} onClose={() => setScanOpen(false)} forOrder onLines={addScanned} />
       <ItemFormModal target={itemForm} onClose={() => { focusItemBox(itemForm.rowKey); setItemForm(null); }} onSaved={itemSaved} />
       <Toast toast={toast} />
     </div>
