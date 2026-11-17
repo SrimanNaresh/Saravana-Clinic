@@ -20,11 +20,12 @@ const COLS = [
   { key: 'sgstPercent', col: 'SGSTPercent', label: 'SGST %', kind: 'number', w: 'w-16' },
   { key: 'rack', col: 'Rack', label: 'Rack', kind: 'text', w: 'w-20' },
   { key: 'boxNo', col: 'BoxNo', label: 'Box', kind: 'text', w: 'w-16' },
+  { key: 'reorderLevel', col: 'ReorderLevel', label: 'Re-order', kind: 'number', w: 'w-20' },
   { key: 'status', col: 'Status', label: 'Status', kind: 'status', w: 'w-24' },
 ];
 
 // A cell's value as the box shows it, for comparing with what was typed.
-const asText = (col, v) => (v == null ? '' : ['MRP', 'CGSTPercent', 'SGSTPercent'].includes(col) ? String(Number(v)) : String(v));
+const asText = (col, v) => (v == null ? '' : ['MRP', 'CGSTPercent', 'SGSTPercent', 'ReorderLevel'].includes(col) ? String(Number(v)) : String(v));
 
 // Pharmacy > Item > Bulk Update: the item list as an editable grid. Changes are
 // kept across pages and searches until Save sends them all at once; if any

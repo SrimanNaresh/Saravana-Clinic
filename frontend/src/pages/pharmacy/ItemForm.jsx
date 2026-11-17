@@ -7,7 +7,7 @@ export const MAX_GST = 28;
 
 export const emptyForm = {
   name: '', unit: '', hsnCode: '', pack: '', mrp: '', cgstPercent: '', sgstPercent: '', rack: '', boxNo: '',
-  generic: '', manufacturer: '', category: '', potency: '', schedule: 'None', status: 'Active',
+  generic: '', manufacturer: '', category: '', potency: '', schedule: 'None', status: 'Active', reorderLevel: '',
 };
 
 const str = (v) => (v == null ? '' : String(v));
@@ -18,12 +18,14 @@ export const rowToForm = (r) => ({
   mrp: numStr(r.MRP), cgstPercent: numStr(r.CGSTPercent), sgstPercent: numStr(r.SGSTPercent),
   rack: str(r.Rack), boxNo: str(r.BoxNo), generic: str(r.GenericName), manufacturer: str(r.ManufacturerName),
   category: str(r.Category), potency: str(r.Potency), schedule: r.Schedule || 'None', status: r.Status || 'Active',
+  reorderLevel: numStr(r.ReorderLevel),
 });
 
 // Same checks the server runs; returns the first problem or null.
 export function validate(f) {
   if (!f.name.trim()) return 'Item Name is required';
   if (f.mrp !== '' && !(Number(f.mrp) >= 0)) return 'MRP must be 0 or more';
+  if (f.reorderLevel !== '' && f.reorderLevel != null && !(Number(f.reorderLevel) >= 0)) return 'Re-order Level must be 0 or more';
   const c = Number(f.cgstPercent || 0);
   const s = Number(f.sgstPercent || 0);
   if (!(c >= 0 && c <= MAX_GST) || !(s >= 0 && s <= MAX_GST)) return `CGST % and SGST % must be between 0 and ${MAX_GST}`;
@@ -63,7 +65,7 @@ export function ItemFields({ form, setForm, editing, handlersFor, narrow = false
         {field('Box', <input className={inp} value={form.boxNo} onChange={onInput('boxNo')} />)}
       </div>
 
-      <div className={`mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 ${narrow ? 'lg:grid-cols-3' : 'lg:grid-cols-6'}`}>
+      <div className={`mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 ${narrow ? 'lg:grid-cols-3' : 'lg:grid-cols-7'}`}>
         {field('Generic Name', <CellCombo className={combo} value={form.generic} onChange={set('generic')} placeholder="Pick or add" {...handlersFor('generic')} />)}
         {field('Manufacturer', <CellCombo className={combo} value={form.manufacturer} onChange={set('manufacturer')} placeholder="Pick or add" {...handlersFor('manufacturer')} />)}
         {field('Category', <CellCombo className={combo} value={form.category} onChange={set('category')} placeholder="Pick or add" {...handlersFor('category')} />)}
@@ -80,6 +82,12 @@ export function ItemFields({ form, setForm, editing, handlersFor, narrow = false
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
           </select>
+        ))}
+        {field('Re-order Level', (
+          <input
+            type="number" min="0" step="any" className={`${inp} no-spin`} value={form.reorderLevel ?? ''} onChange={onInput('reorderLevel')}
+            placeholder="5" title="Packs. At or below this the item shows as low stock (empty = 5)"
+          />
         ))}
       </div>
     </>

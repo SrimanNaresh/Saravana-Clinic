@@ -53,6 +53,8 @@ import StockReport from './pages/pharmacy/StockReport.jsx';
 import AllInOneReport from './pages/pharmacy/AllInOneReport.jsx';
 import VendorPayments from './pages/pharmacy/VendorPayments.jsx';
 import VendorPaymentEntry from './pages/pharmacy/VendorPaymentEntry.jsx';
+import LowStockReport from './pages/pharmacy/LowStockReport.jsx';
+import ExpiryReport from './pages/pharmacy/ExpiryReport.jsx';
 import PatientRecords from './pages/reports/PatientRecords.jsx';
 import FollowUpPatients from './pages/reports/FollowUpPatients.jsx';
 import PrescriptionPrint from './pages/confirm/PrescriptionPrint.jsx';
@@ -188,6 +190,8 @@ function AppLayout({ appName }) {
               <Route path="/pharmacy/stock-report" element={<StockReport />} />
               <Route path="/pharmacy/vendor-payments" element={<VendorPayments />} />
               <Route path="/pharmacy/all-in-one-report" element={<AllInOneReport />} />
+              <Route path="/pharmacy/low-stock" element={<LowStockReport />} />
+              <Route path="/pharmacy/expiry-report" element={<ExpiryReport />} />
             </Routes>
           </div>
         </main>

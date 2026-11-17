@@ -3,6 +3,7 @@ import { getPool, sql } from '../db/pool.js';
 import { docNoSql } from '../utils/docNumber.js';
 import { code6, EVENTS } from '../utils/stockEvents.js';
 import allInOneRoutes from './allInOneReport.js';
+import { batchStock } from '../utils/batchStock.js';
 
 // Pharmacy > Report: Stock Report (item-wise, with each item's history) and
 // Vendor Payments. Both read the documents themselves, so they always agree
@@ -56,6 +57,85 @@ router.get('/stock', async (req, res) => {
       all: () => true,
     }[show] || ((r) => r.Events > 0);
     res.json(result.recordset.filter(keep));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// At or below this many packs an item is low on stock, unless the item has
+// its own Re-order Level.
+export const LOW_STOCK_DEFAULT = 5;
+const ITEM_CODE_SQL = `'ITM' + RIGHT('000000' + CAST(i.ItemId AS VARCHAR(10)), 6)`;
+
+// Expiry Report: every batch with stock left that has expired or expires in
+// the next 90 days (the screen's tabs narrow it to 30 / 60 days), earliest
+// first. Stock and expiry come from batchStock, the same numbers Sales uses.
+router.get('/expiry', async (req, res) => {
+  try {
+    const { category = '' } = req.query;
+    const pool = await getPool();
+    const items = (await pool.request().input('category', sql.NVarChar, category).query(`
+      SELECT i.ItemId, ${ITEM_CODE_SQL} AS ItemCode, i.Name, i.Category, i.MRP
+      FROM PharmacyItem i WHERE i.IsActive = 1 AND (@category = '' OR i.Category = @category)`)).recordset;
+    const byId = new Map(items.map((i) => [i.ItemId, i]));
+    const limit = new Date();
+    limit.setHours(0, 0, 0, 0);
+    limit.setDate(limit.getDate() + 90);
+    const batches = (await batchStock(pool.request(), items.map((i) => i.ItemId)))
+      .filter((b) => b.AvailableQty > 0 && b.ExpiryDate && new Date(b.ExpiryDate) <= limit);
+    // Who supplied each batch last (its latest active Stock In).
+    const vendors = new Map((await pool.request().query(`
+      SELECT l.ItemId, l.BatchNo, v.VendorName,
+             ROW_NUMBER() OVER (PARTITION BY l.ItemId, l.BatchNo ORDER BY h.StockInId DESC) AS rn
+      FROM StockInItem l JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
+      JOIN Vendor v ON v.VendorId = h.VendorId`)).recordset.filter((r) => r.rn === 1).map((r) => [`${r.ItemId}|${r.BatchNo}`, r.VendorName]));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    res.json(batches.map((b) => {
+      const item = byId.get(b.ItemId);
+      const mrp = b.MRP ?? (item.MRP == null ? null : Number(item.MRP));
+      const days = Math.round((new Date(b.ExpiryDate) - today) / 86400000);
+      return {
+        ItemId: b.ItemId, ItemCode: item.ItemCode, Name: item.Name, Category: item.Category, Batch: b.Batch,
+        ExpiryDate: b.ExpiryDate, DaysLeft: days, Stock: Math.round(b.AvailableQty * 100) / 100, MRP: mrp,
+        StockValue: mrp == null ? 0 : Math.round(b.AvailableQty * mrp * 100) / 100,
+        VendorName: vendors.get(`${b.ItemId}|${b.Batch}`) || null,
+      };
+    }).sort((a, b) => new Date(a.ExpiryDate) - new Date(b.ExpiryDate)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Low Stock: active items at or below their Re-order Level (default 5 packs).
+// ?category; ?all=1 also lists items that never had any stock.
+router.get('/low-stock', async (req, res) => {
+  try {
+    const { category = '', all = '' } = req.query;
+    const pool = await getPool();
+    const r = await pool.request().input('itemId', sql.Int, null).input('category', sql.NVarChar, category)
+      .input('def', sql.Decimal(10, 2), LOW_STOCK_DEFAULT).input('all', sql.Bit, all === '1' ? 1 : 0).query(`
+        WITH Ev AS (${EVENTS}),
+        St AS (SELECT ItemId, SUM(Qty) AS Stock, COUNT(*) AS Events FROM Ev GROUP BY ItemId)
+        SELECT i.ItemId, ${ITEM_CODE_SQL} AS ItemCode, i.Name, i.Category, i.Pack,
+               ISNULL(st.Stock, 0) AS Stock, i.ReorderLevel, ISNULL(i.ReorderLevel, @def) AS Level,
+               ISNULL(i.ReorderLevel, @def) - ISNULL(st.Stock, 0) AS ShortBy,
+               lastIn.VendorName, lastPo.PRate AS LastPRate
+        FROM PharmacyItem i
+        LEFT JOIN St st ON st.ItemId = i.ItemId
+        OUTER APPLY (SELECT TOP 1 v.VendorName FROM StockInItem l
+                     JOIN StockIn h ON h.StockInId = l.StockInId AND h.IsActive = 1
+                     JOIN Vendor v ON v.VendorId = h.VendorId
+                     WHERE l.ItemId = i.ItemId ORDER BY h.StockInId DESC) lastIn
+        OUTER APPLY (SELECT TOP 1 pol.PRate FROM PurchaseOrderItem pol
+                     JOIN PurchaseOrder po ON po.PurchaseOrderId = pol.PurchaseOrderId AND po.IsActive = 1
+                     WHERE pol.ItemId = i.ItemId AND pol.PRate IS NOT NULL ORDER BY pol.LineId DESC) lastPo
+        WHERE i.IsActive = 1 AND i.Status = 'Active'
+          AND (@category = '' OR i.Category = @category)
+          AND ISNULL(st.Stock, 0) <= ISNULL(i.ReorderLevel, @def)
+          AND (@all = 1 OR ISNULL(st.Events, 0) > 0)
+        ORDER BY ISNULL(st.Stock, 0), i.Name`);
+    res.json(r.recordset.map((x) => ({ ...x, Stock: Number(x.Stock), Level: Number(x.Level), ShortBy: Number(x.ShortBy) })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

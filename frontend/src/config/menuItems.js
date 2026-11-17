@@ -87,6 +87,8 @@ export const MENU_GROUPS = [
           { key: 'pharmacy.stock-report', label: 'Stock Report', to: '/pharmacy/stock-report' },
           { key: 'pharmacy.vendor-payments', label: 'Vendor Payments', to: '/pharmacy/vendor-payments' },
           { key: 'pharmacy.all-in-one-report', label: 'All in One', to: '/pharmacy/all-in-one-report' },
+          { key: 'pharmacy.expiry-report', label: 'Expiry', to: '/pharmacy/expiry-report' },
+          { key: 'pharmacy.low-stock', label: 'Low Stock', to: '/pharmacy/low-stock' },
         ],
       },
     ],

@@ -88,7 +88,7 @@ export default function ItemListPage() {
                 </thead>
                 <tbody>
                   {shown.map((r) => {
-                    const low = Number(r.Stock) <= 0;
+                    const low = Number(r.Stock) <= (r.ReorderLevel != null ? Number(r.ReorderLevel) : 5);
                     return (
                       <tr key={r.ItemId}>
                         <td className="ph-mid text-ink-500">{r.ItemCode}</td>

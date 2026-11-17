@@ -232,6 +232,10 @@ export const pharmacyReportApi = {
   // params: { search, category, show: 'history' | 'instock' | 'outofstock' | 'all' }
   stock: (params) => api.get('/pharmacy-reports/stock', { params }).then((r) => r.data),
   history: (itemId) => api.get(`/pharmacy-reports/stock/${itemId}/history`).then((r) => r.data),
+  // params: { category }
+  expiry: (params) => api.get('/pharmacy-reports/expiry', { params }).then((r) => r.data),
+  // params: { category, all: '1' to include never-stocked items }
+  lowStock: (params) => api.get('/pharmacy-reports/low-stock', { params }).then((r) => r.data),
   // params: { from, to } as YYYY-MM-DD; either may be blank
   vendorPayments: (params) => api.get('/pharmacy-reports/vendor-payments', { params }).then((r) => r.data),
   vendorDocs: (vendorId, params) => api.get(`/pharmacy-reports/vendor-payments/${vendorId}`, { params }).then((r) => r.data),

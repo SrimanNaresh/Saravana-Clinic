@@ -33,7 +33,7 @@ const ITEM_SELECT = `
          ISNULL(i.SGSTPercent, i.GSTPercent / 2) AS SGSTPercent,
          i.GSTPercent,
          CASE WHEN i.ScheduleH1 = 1 THEN 'H1' WHEN i.ScheduleH = 1 THEN 'H' ELSE 'None' END AS Schedule,
-         i.Status, ISNULL(st.CurrentStock, 0) AS Stock,
+         i.Status, ISNULL(st.CurrentStock, 0) AS Stock, i.ReorderLevel,
          ISNULL((SELECT TOP 1 pol.PRate FROM PurchaseOrderItem pol
                  JOIN PurchaseOrder po ON po.PurchaseOrderId = pol.PurchaseOrderId AND po.IsActive = 1
                  WHERE pol.ItemId = i.ItemId AND pol.PRate IS NOT NULL ORDER BY pol.LineId DESC), i.PurchaseRate) AS LastPRate
@@ -208,6 +208,9 @@ async function checkItem(pool, body) {
     if (v[k] && v[k].length > max) return { error: `${label} must be at most ${max} characters` };
   }
   v.mrp = isNum(body.mrp) ? Number(body.mrp) : null;
+  // Re-order level in packs; empty = the default (low stock at 5 or less).
+  if (text(body.reorderLevel) !== '' && !(isNum(body.reorderLevel) && Number(body.reorderLevel) >= 0)) return { error: 'Re-order Level must be 0 or more' };
+  v.reorder = text(body.reorderLevel) === '' || body.reorderLevel == null ? null : Number(body.reorderLevel);
   v.cgst = isNum(body.cgstPercent) ? Number(body.cgstPercent) : 0;
   v.sgst = isNum(body.sgstPercent) ? Number(body.sgstPercent) : 0;
   const pricing = checkPricing(v);
@@ -237,7 +240,8 @@ function bindItem(request, v) {
     .input('gst', sql.Decimal(5, 2), v.cgst + v.sgst)
     .input('h', sql.Bit, v.schedule === 'H' ? 1 : 0)
     .input('h1', sql.Bit, v.schedule === 'H1' ? 1 : 0)
-    .input('status', sql.NVarChar(10), v.status);
+    .input('status', sql.NVarChar(10), v.status)
+    .input('reorder', sql.Decimal(10, 2), v.reorder ?? null);
 }
 
 // Add: starts with no stock (Stock In or Stock Adjustment adds it); selling
@@ -249,10 +253,10 @@ router.post('/', async (req, res) => {
   try {
     const ins = await bindItem(pool.request(), v).query(`
       INSERT INTO PharmacyItem (Name, UnitId, GenericNameId, ManufacturerId, Category, Potency, HSNCode, Pack, Rack, BoxNo,
-                                MRP, SellPrice, CGSTPercent, SGSTPercent, GSTPercent, ScheduleH, ScheduleH1, Status)
+                                MRP, SellPrice, CGSTPercent, SGSTPercent, GSTPercent, ScheduleH, ScheduleH1, Status, ReorderLevel)
       OUTPUT INSERTED.ItemId
       VALUES (@name, @unitId, @genericId, @manufacturerId, @category, @potency, @hsn, @pack, @rack, @box,
-              @mrp, @mrp, @cgst, @sgst, @gst, @h, @h1, @status)`);
+              @mrp, @mrp, @cgst, @sgst, @gst, @h, @h1, @status, @reorder)`);
     const itemId = ins.recordset[0].ItemId;
     res.status(201).json({ ItemId: itemId, ItemCode: `ITM${String(itemId).padStart(6, '0')}` });
   } catch (err) {
@@ -275,7 +279,7 @@ router.put('/:id', async (req, res) => {
           Category = @category, Potency = @potency, HSNCode = @hsn, Pack = @pack, Rack = @rack, BoxNo = @box,
           MRP = @mrp, CGSTPercent = @cgst, SGSTPercent = @sgst, GSTPercent = @gst,
           SellPrice = CASE WHEN @mrp IS NOT NULL AND (SellPrice IS NULL OR SellPrice > @mrp) THEN @mrp ELSE SellPrice END,
-          ScheduleH = @h, ScheduleH1 = @h1, Status = @status, EditedAt = GETDATE()
+          ScheduleH = @h, ScheduleH1 = @h1, Status = @status, ReorderLevel = @reorder, EditedAt = GETDATE()
       WHERE ItemId = @id AND IsActive = 1`);
     if (!upd.rowsAffected[0]) return res.status(404).json({ error: 'Item not found' });
     res.json({ ItemId: itemId });
@@ -360,6 +364,11 @@ router.post('/bulk-update', async (req, res) => {
         if (sets[k] && sets[k].length > max) { fail(`${label} must be at most ${max} characters`); bad = true; break; }
       }
       if (bad) continue;
+      if ('reorderLevel' in r) {
+        const t = text(r.reorderLevel);
+        if (t !== '' && !(isNum(t) && Number(t) >= 0)) { fail('Re-order Level must be 0 or more'); continue; }
+        sets.reorder = t === '' ? null : Number(t);
+      }
       if ('status' in r) {
         sets.status = text(r.status);
         if (!['Active', 'Inactive'].includes(sets.status)) { fail('Status must be Active or Inactive'); continue; }
@@ -394,6 +403,7 @@ router.post('/bulk-update', async (req, res) => {
         if ('rack' in sets) put('Rack', 'rack', sql.NVarChar(50), sets.rack);
         if ('boxNo' in sets) put('BoxNo', 'box', sql.NVarChar(50), sets.boxNo);
         if ('status' in sets) put('Status', 'status', sql.NVarChar(10), sets.status);
+        if ('reorder' in sets) put('ReorderLevel', 'reorder', sql.Decimal(10, 2), sets.reorder);
         if ('mrp' in r) {
           put('MRP', 'mrp', sql.Decimal(10, 2), after.mrp);
           cols.push('SellPrice = CASE WHEN @mrp IS NOT NULL AND (SellPrice IS NULL OR SellPrice > @mrp) THEN @mrp ELSE SellPrice END');
