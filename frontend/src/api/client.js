@@ -248,6 +248,9 @@ export const pharmacyReportApi = {
   // params: { screen, columns (comma-separated keys), from, to, filters (JSON { columnKey: [values] }) }
   allInOne: (params) => api.get('/pharmacy-reports/all-in-one', { params }).then((r) => r.data),
 };
+export const pharmacyDashboardApi = {
+  get: () => api.get('/pharmacy-dashboard').then((r) => r.data),
+};
 // Pharmacy > Sales > Credit Ledger
 export const customerPaymentApi = {
   patients: (params) => api.get('/customer-payments/patients', { params }).then((r) => r.data),

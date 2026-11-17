@@ -33,6 +33,7 @@ export const MENU_GROUPS = [
       // Exactly the Pharmacy spec's parts (Item, Vendor, Purchase / Order,
       // Stock In, Return, Sales, Report), each with Master / List. Keys are
       // kept from the older screens so existing Menu Access grants still apply.
+      { key: 'pharmacy.dashboard', label: 'Dashboard', to: '/pharmacy/dashboard' },
       {
         label: 'Item',
         submenu: [
