@@ -1114,6 +1114,108 @@ async function init() {
           CREATE INDEX IX_StockInward_ItemId ON StockInward (ItemId) INCLUDE (Batch, ExpiryDate, Quantity, IsActive);
     `);
 
+    // ---- Pharmacy update (docs/saravana_pharmacy_db.md §7, 17-11-2026) ----
+    // Adds only: no drop, no rename, no type change; every new column is NULL or
+    // has a default, so old rows and old bills keep working. Safe to run again.
+    // Columns first (own batch); the keys / indexes that use them in the next.
+    await pool.request().batch(`
+      -- Re-order level per item (packs). NULL = the default (5).
+      IF COL_LENGTH('PharmacyItem','ReorderLevel') IS NULL
+          ALTER TABLE PharmacyItem ADD ReorderLevel DECIMAL(10,2) NULL;
+
+      -- Clinic GST details printed on the A4 GST invoice.
+      IF COL_LENGTH('ClinicDetails','GSTIN') IS NULL         ALTER TABLE ClinicDetails ADD GSTIN NVARCHAR(15) NULL;
+      IF COL_LENGTH('ClinicDetails','DrugLicenceNo') IS NULL ALTER TABLE ClinicDetails ADD DrugLicenceNo NVARCHAR(100) NULL;
+      IF COL_LENGTH('ClinicDetails','StateName') IS NULL     ALTER TABLE ClinicDetails ADD StateName NVARCHAR(60) NULL;
+
+      -- Sales: patient / prescription / doctor, payment, and the bill's GST sums.
+      IF COL_LENGTH('SalesBilling','PatientId') IS NULL      ALTER TABLE SalesBilling ADD PatientId INT NULL;
+      IF COL_LENGTH('SalesBilling','PrescriptionId') IS NULL ALTER TABLE SalesBilling ADD PrescriptionId INT NULL;
+      IF COL_LENGTH('SalesBilling','DoctorId') IS NULL       ALTER TABLE SalesBilling ADD DoctorId INT NULL;
+      IF COL_LENGTH('SalesBilling','PayMode') IS NULL
+          ALTER TABLE SalesBilling ADD PayMode NVARCHAR(20) NOT NULL CONSTRAINT DF_SalesBilling_PayMode DEFAULT 'Cash';
+      IF COL_LENGTH('SalesBilling','PayReference') IS NULL   ALTER TABLE SalesBilling ADD PayReference NVARCHAR(50) NULL;
+      IF COL_LENGTH('SalesBilling','PaidAmount') IS NULL     ALTER TABLE SalesBilling ADD PaidAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBilling','DueAmount') IS NULL
+          ALTER TABLE SalesBilling ADD DueAmount DECIMAL(12,2) NOT NULL CONSTRAINT DF_SalesBilling_DueAmount DEFAULT 0;
+      IF COL_LENGTH('SalesBilling','TaxableAmount') IS NULL  ALTER TABLE SalesBilling ADD TaxableAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBilling','CGSTAmount') IS NULL     ALTER TABLE SalesBilling ADD CGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBilling','SGSTAmount') IS NULL     ALTER TABLE SalesBilling ADD SGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBilling','IGSTAmount') IS NULL     ALTER TABLE SalesBilling ADD IGSTAmount DECIMAL(12,2) NULL;
+
+      -- GST stored on each sale and sales-return line, as it was on the day.
+      IF COL_LENGTH('SalesBillingItem','HSNCode') IS NULL       ALTER TABLE SalesBillingItem ADD HSNCode NVARCHAR(30) NULL;
+      IF COL_LENGTH('SalesBillingItem','GSTPercent') IS NULL    ALTER TABLE SalesBillingItem ADD GSTPercent DECIMAL(5,2) NULL;
+      IF COL_LENGTH('SalesBillingItem','NetAmount') IS NULL     ALTER TABLE SalesBillingItem ADD NetAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBillingItem','TaxableAmount') IS NULL ALTER TABLE SalesBillingItem ADD TaxableAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBillingItem','CGSTAmount') IS NULL    ALTER TABLE SalesBillingItem ADD CGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBillingItem','SGSTAmount') IS NULL    ALTER TABLE SalesBillingItem ADD SGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesBillingItem','IGSTAmount') IS NULL    ALTER TABLE SalesBillingItem ADD IGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturnItem','HSNCode') IS NULL        ALTER TABLE SalesReturnItem ADD HSNCode NVARCHAR(30) NULL;
+      IF COL_LENGTH('SalesReturnItem','GSTPercent') IS NULL     ALTER TABLE SalesReturnItem ADD GSTPercent DECIMAL(5,2) NULL;
+      IF COL_LENGTH('SalesReturnItem','NetAmount') IS NULL      ALTER TABLE SalesReturnItem ADD NetAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturnItem','TaxableAmount') IS NULL  ALTER TABLE SalesReturnItem ADD TaxableAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturnItem','CGSTAmount') IS NULL     ALTER TABLE SalesReturnItem ADD CGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturnItem','SGSTAmount') IS NULL     ALTER TABLE SalesReturnItem ADD SGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturnItem','IGSTAmount') IS NULL     ALTER TABLE SalesReturnItem ADD IGSTAmount DECIMAL(12,2) NULL;
+
+      -- Sales Return: Cash refund or Credit (lowers the patient's due); GST sums.
+      IF COL_LENGTH('SalesReturn','RefundMode') IS NULL
+          ALTER TABLE SalesReturn ADD RefundMode NVARCHAR(20) NOT NULL CONSTRAINT DF_SalesReturn_RefundMode DEFAULT 'Cash';
+      IF COL_LENGTH('SalesReturn','TaxableAmount') IS NULL ALTER TABLE SalesReturn ADD TaxableAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturn','CGSTAmount') IS NULL    ALTER TABLE SalesReturn ADD CGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturn','SGSTAmount') IS NULL    ALTER TABLE SalesReturn ADD SGSTAmount DECIMAL(12,2) NULL;
+      IF COL_LENGTH('SalesReturn','IGSTAmount') IS NULL    ALTER TABLE SalesReturn ADD IGSTAmount DECIMAL(12,2) NULL;
+
+      -- Money received against a patient's credit (Sales > Credit Ledger). SC-CP0001.
+      IF OBJECT_ID('CustomerPayment', 'U') IS NULL
+      CREATE TABLE CustomerPayment (
+          PaymentId   INT IDENTITY(1,1) PRIMARY KEY,
+          PatientId   INT NOT NULL,
+          PayDate     DATE NOT NULL,
+          Amount      DECIMAL(12,2) NOT NULL,
+          PayMode     NVARCHAR(20) NOT NULL,
+          ReferenceNo NVARCHAR(50) NULL,
+          Notes       NVARCHAR(300) NULL,
+          CreatedBy   NVARCHAR(100) NULL,
+          IsActive    BIT NOT NULL DEFAULT 1,
+          CreatedAt   DATETIME NOT NULL DEFAULT GETDATE(),
+          CONSTRAINT FK_CustomerPayment_Patient FOREIGN KEY (PatientId) REFERENCES Patient(PatientId),
+          CONSTRAINT CK_CustomerPayment_Amount CHECK (Amount > 0)
+      );
+
+      -- Stock In > Three in One: a bill kept as a draft (screen data only).
+      IF OBJECT_ID('IpsDraft', 'U') IS NULL
+      CREATE TABLE IpsDraft (
+          DraftId   INT IDENTITY(1,1) PRIMARY KEY,
+          VendorId  INT NULL,
+          BillNo    NVARCHAR(50) NULL,
+          BillDate  DATE NULL,
+          Data      NVARCHAR(MAX) NOT NULL,
+          LineCount INT NOT NULL DEFAULT 0,
+          NetAmount DECIMAL(12,2) NOT NULL DEFAULT 0,
+          CreatedBy NVARCHAR(100) NULL,
+          CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+          UpdatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+          CONSTRAINT FK_IpsDraft_Vendor FOREIGN KEY (VendorId) REFERENCES Vendor(VendorId),
+          CONSTRAINT CK_IpsDraft_Json CHECK (ISJSON(Data) = 1)
+      );
+    `);
+    await pool.request().batch(`
+      IF OBJECT_ID('FK_SalesBilling_Patient') IS NULL
+          ALTER TABLE SalesBilling ADD CONSTRAINT FK_SalesBilling_Patient FOREIGN KEY (PatientId) REFERENCES Patient(PatientId);
+      IF OBJECT_ID('FK_SalesBilling_Prescription') IS NULL
+          ALTER TABLE SalesBilling ADD CONSTRAINT FK_SalesBilling_Prescription FOREIGN KEY (PrescriptionId) REFERENCES Prescription(PrescriptionId);
+      IF OBJECT_ID('FK_SalesBilling_Doctor') IS NULL
+          ALTER TABLE SalesBilling ADD CONSTRAINT FK_SalesBilling_Doctor FOREIGN KEY (DoctorId) REFERENCES Employee(EmployeeId);
+      IF OBJECT_ID('CK_SalesBilling_Due') IS NULL
+          ALTER TABLE SalesBilling ADD CONSTRAINT CK_SalesBilling_Due CHECK (DueAmount >= 0);
+      IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SalesBilling_PatientId')
+          CREATE INDEX IX_SalesBilling_PatientId ON SalesBilling (PatientId) INCLUDE (TotalAmount, DueAmount, TransDate) WHERE IsActive = 1;
+      IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CustomerPayment_PatientId')
+          CREATE INDEX IX_CustomerPayment_PatientId ON CustomerPayment (PatientId) INCLUDE (Amount) WHERE IsActive = 1;
+    `);
+
     // Seed the default Admin user only if it doesn't already exist.
     const exists = await pool
       .request()
