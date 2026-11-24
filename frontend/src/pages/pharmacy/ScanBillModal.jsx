@@ -7,7 +7,7 @@ import {
 import { Modal } from '../../components/ui.jsx';
 import { itemMasterApi } from '../../api/client.js';
 import { emptyForm } from './ItemForm.jsx';
-import { BILL_FIELDS, buildIndex, compact, extractBillHeader, extractBillRows, extractBillTable, extractItems, matchName } from '../../utils/billScan.js';
+import { BILL_FIELDS, UNREAD_NAME, buildIndex, compact, extractBillHeader, extractBillRows, extractBillTable, extractItems, matchName } from '../../utils/billScan.js';
 import { gridKeys } from '../../components/grid/gridKeys.js';
 
 // Item Master > Scan Bill: add a supplier bill's new items to Item Master.
@@ -258,8 +258,11 @@ function fieldsOf(cells, map, targets = TARGETS) {
   // On the order P.Rate = MRP less Disc % (the order puts that right when the
   // line goes on it). No P.Rate on the bill: the rate is the Amount / Qty, or
   // the Old Price (net rate) column.
+  // Three in One (IPS) takes P.Rate exactly as read: nothing is worked out for
+  // it — with no Rate column, an Old Price (net rate) column is used as it is.
   if (!(n('pRate') > 0)) {
-    const net = n('amount') > 0 && n('qty') > 0 ? n('amount') / n('qty') : n('oldPrice');
+    const asRead = targets === IPS_TARGETS;
+    const net = !asRead && n('amount') > 0 && n('qty') > 0 ? n('amount') / n('qty') : n('oldPrice');
     if (net > 0) o.pRate = r2(net);
   }
   // No GST % on the bill: from CGST + SGST, else GST Amt or Total against the
@@ -326,6 +329,14 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
   // For an order: the supplier and bill date read from the top of page 1
   // ({ vendorName, address, mobile, gstNo, email, billDate }), or null.
   const [supplier, setSupplier] = useState(null);
+  // Three in One, a bill of several pages: pages whose lines are already in the
+  // table, lines sent so far, and the last column matching (offered again for
+  // the next page when it has as many columns).
+  const [donePages, setDonePages] = useState([]);
+  const [added, setAdded] = useState(0);
+  const lastMap = useRef(null);
+  const sentSupplier = useRef(false);
+  const appendRef = useRef(false); // the file being picked adds pages instead of starting over
   const photoRef = useRef(null);
   const fileRef = useRef(null);
   const ocrRef = useRef(null); // Tesseract reader, made on first use
@@ -335,7 +346,9 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
   const reset = () => {
     setStep('pick'); setFileName(''); setPages([]); setPageNo(0); setBox(null); setZoom(1); setMoving(false); setRows([]); setTab('new');
     setRawText(''); setError(''); setSummary(''); setBusy(null); setSupplier(null); setTable(null); setColMap({});
+    setDonePages([]); setAdded(0); lastMap.current = null; sentSupplier.current = false;
   };
+  const pick = (ref, append = false) => { appendRef.current = append; ref.current?.click(); };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -423,17 +436,23 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
     return [...rs.slice(0, i + 1), newRow({ name: '' }), ...rs.slice(i + 1)];
   });
 
-  // 1. A bill was chosen: show it, turned upright.
+  // 1. A bill was chosen (one or more photos / PDFs, in the order picked): show
+  //    its pages, turned upright. Adding pages puts them after the ones open
+  //    now and shows the first new one.
   const onFile = async (e) => {
-    const file = e.target.files?.[0];
+    const files = [...(e.target.files || [])];
     e.target.value = '';
-    if (!file) return;
-    reset();
-    setFileName(file.name);
+    if (!files.length) return;
+    const append = appendRef.current && pages.length > 0;
+    appendRef.current = false;
+    if (!append) reset();
+    setError('');
+    setFileName((n) => (append && n ? `${n}, ${files.map((f) => f.name).join(', ')}` : files.map((f) => f.name).join(', ')));
     try {
       setBusy({ stage: 'Opening the bill', percent: null });
       const { loadBillPages } = await import('../../utils/billOcr.js');
-      const loaded = await loadBillPages(file);
+      const loaded = [];
+      for (const f of files) loaded.push(...await loadBillPages(f));
       const ocr = await getOcr();
       setBusy({ stage: 'Turning the bill the right way up', percent: null });
       const { rotateCanvas } = await import('../../utils/billOcr.js');
@@ -444,11 +463,13 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
         deg = await ocr.uprightAngle(p, deg);
         upright.push(rotateCanvas(p, deg));
       }
-      setPages(upright);
+      setPages((ps) => (append ? [...ps, ...upright] : upright));
+      setPageNo(append ? pages.length : 0);
+      setBox(null); setZoom(1); setMoving(false); setTable(null);
       setStep('select');
     } catch (err) {
       setError(err.message || "Couldn't open this bill");
-      setStep('pick');
+      if (!append) setStep('pick');
     } finally {
       setBusy(null);
     }
@@ -483,7 +504,8 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
       const billTable = tableMode ? extractBillTable(layout) : null;
       if (billTable?.rows.length) {
         setTable(billTable);
-        setColMap(autoMapTable(billTable, targets));
+        const prev = lastMap.current;
+        setColMap(prev && prev.n === billTable.heads.length ? prev.map : autoMapTable(billTable, targets));
         setStep('map');
         return;
       }
@@ -522,9 +544,22 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
     // Stock In: the bill's lines (with an item name) go back to fill its rows.
     // Three in One: every line with an item name, with the order's maths
     // (Disc % read as a %, P.Rate / GST % from Amount, Total... when missing).
+    // (A line whose name couldn't be read comes as UNREAD_NAME: kept, with an
+    // empty name to fill in, so the bill's line isn't lost.) The popup then
+    // stays open for the bill's next page; the supplier goes with the first fill.
     if (forIps) {
       const blank = Object.fromEntries(IPS_TARGETS.map(([k]) => [k, '']));
-      onIpsLines?.(table.rows.map((cells) => ({ ...blank, ...fieldsOf(cells, colMap, IPS_TARGETS) })).filter((f) => compact(f.name)), { supplier });
+      const lines = table.rows.map((cells) => ({ ...blank, ...fieldsOf(cells, colMap, IPS_TARGETS) }))
+        .filter((f) => compact(f.name) || String(f.name).trim() === UNREAD_NAME)
+        .map((f) => (String(f.name).trim() === UNREAD_NAME ? { ...f, name: '' } : f));
+      lastMap.current = { n: table.heads.length, map: colMap };
+      const first = !sentSupplier.current;
+      sentSupplier.current = true;
+      onIpsLines?.(lines, { supplier: first ? supplier : null });
+      setAdded((n) => n + lines.length);
+      setDonePages((d) => (d.includes(pageNo) ? d : [...d, pageNo]));
+      setBox(null);
+      setStep('done');
       return;
     }
     // Each placed column's value as read (no order maths: Stock In uses them).
@@ -680,7 +715,7 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
     <Modal open={open} onClose={working ? () => {} : onClose} size="xl" title={forIps ? 'Scan Bill · Three in One' : forStock ? 'Scan Stock Bill' : 'Scan Purchase Bill'}>
       <div className="space-y-3">
         <input ref={photoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
-        <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" className="hidden" onChange={onFile} />
+        <input ref={fileRef} type="file" multiple={forIps} accept="image/*,application/pdf,.pdf" className="hidden" onChange={onFile} />
 
         <Steps step={step} forOrder={tableMode} last={forIps ? 'Fill the table' : forStock ? 'Fill Stock In' : undefined} />
 
@@ -693,10 +728,10 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
               <p className="text-xs">A photo (JPG / PNG) or a PDF. Next you&apos;ll mark {tableMode ? 'the item table on it, header row included' : 'the Item Description column on it'}.</p>
             </div>
             <div className="flex w-full max-w-sm gap-2">
-              <button type="button" className="btn-secondary min-w-0 flex-1 whitespace-nowrap px-2 sm:hidden" disabled={!itemsReady} onClick={() => photoRef.current?.click()}>
+              <button type="button" className="btn-secondary min-w-0 flex-1 whitespace-nowrap px-2 sm:hidden" disabled={!itemsReady} onClick={() => pick(photoRef)}>
                 <Camera size={16} /> Take Photo
               </button>
-              <button type="button" className="btn-primary min-w-0 flex-1 whitespace-nowrap px-2" disabled={!itemsReady} onClick={() => fileRef.current?.click()}>
+              <button type="button" className="btn-primary min-w-0 flex-1 whitespace-nowrap px-2" disabled={!itemsReady} onClick={() => pick(fileRef)}>
                 <FileUp size={16} /> {itemsReady ? 'Upload Photo / PDF' : 'Loading items...'}
               </button>
             </div>
@@ -721,6 +756,7 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
                   <>
                     <button type="button" className="btn-ghost px-1.5 py-1" disabled={working || pageNo === 0} title="Previous page" onClick={() => { setPageNo((n) => n - 1); setBox(null); }}><ChevronLeft size={16} /></button>
                     <span className="text-xs tabular-nums text-ink-500">Page {pageNo + 1} / {pages.length}</span>
+                    {donePages.includes(pageNo) && <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"><Check size={12} /> Added</span>}
                     <button type="button" className="btn-ghost px-1.5 py-1" disabled={working || pageNo === pages.length - 1} title="Next page" onClick={() => { setPageNo((n) => n + 1); setBox(null); }}><ChevronRight size={16} /></button>
                     <span className="mx-1 h-4 w-px bg-ink-200" />
                   </>
@@ -744,9 +780,20 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 pt-3">
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn-secondary" disabled={working} onClick={() => fileRef.current?.click()}>
-                  <FileUp size={16} /> Another Bill
-                </button>
+                {forIps && (
+                  <button type="button" className="btn-secondary" disabled={working} title="Add the bill's other pages (photos / PDFs) after the ones open now" onClick={() => pick(fileRef, true)}>
+                    <Plus size={16} /> Add Pages
+                  </button>
+                )}
+                {forIps && added > 0 ? (
+                  <button type="button" className="btn-secondary" disabled={working} onClick={onClose}>
+                    <Check size={16} /> Finish
+                  </button>
+                ) : (
+                  <button type="button" className="btn-secondary" disabled={working} onClick={() => pick(fileRef)}>
+                    <FileUp size={16} /> Another Bill
+                  </button>
+                )}
                 {rows.length > 0 && (
                   <button type="button" className="btn-secondary" disabled={working} onClick={() => setStep('review')}>
                     <ArrowLeft size={16} /> Back to List
@@ -791,6 +838,32 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
             forIps={forIps}
           />
         )}
+
+        {/* Three in One: a page's lines are in the table — read the next page, add more, or finish */}
+        {step === 'done' && !busy && (() => {
+          const nextOpen = pages.findIndex((_, i) => i > pageNo && !donePages.includes(i));
+          return (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 px-4 py-8 text-center">
+              <Check size={28} className="text-emerald-600" />
+              <div className="text-sm text-ink-600">
+                <p className="font-semibold text-ink-800">{added} line{added === 1 ? '' : 's'} added to the table from {donePages.length} page{donePages.length === 1 ? '' : 's'}</p>
+                <p className="text-xs">{nextOpen >= 0 ? `Page ${nextOpen + 1} is not read yet. Read it, or upload the bill's next page.` : 'Has the bill more pages? Upload the next page, or Finish to check the table.'}</p>
+              </div>
+              <div className="flex w-full max-w-lg flex-wrap justify-center gap-2">
+                {nextOpen >= 0 && (
+                  <button type="button" className="btn-primary" onClick={() => { setPageNo(nextOpen); setBox(null); setTable(null); setStep('select'); }}>
+                    <ChevronRight size={16} /> Read Page {nextOpen + 1}
+                  </button>
+                )}
+                <button type="button" className="btn-secondary sm:hidden" onClick={() => pick(photoRef, true)}><Camera size={16} /> Photo of Next Page</button>
+                <button type="button" className={nextOpen >= 0 ? 'btn-secondary' : 'btn-primary'} onClick={() => pick(fileRef, true)}>
+                  <FileUp size={16} /> Upload Next Page
+                </button>
+                <button type="button" className="btn-secondary" onClick={onClose}><Check size={16} /> Finish</button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Step 3: the items, in tabs */}
         {step === 'review' && (
@@ -880,7 +953,7 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
 
 function Steps({ step, forOrder, last = 'Review & add' }) {
   const all = [['pick', 'Upload'], ['select', 'Select table'], ...(forOrder ? [['map', 'Match columns']] : []), ['review', last]];
-  const at = all.findIndex(([k]) => k === step);
+  const at = step === 'done' ? all.length : all.findIndex(([k]) => k === step);
   return (
     <ol className="flex items-center gap-2 text-[11px] font-semibold">
       {all.map(([k, label], i) => (

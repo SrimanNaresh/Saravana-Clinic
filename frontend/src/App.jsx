@@ -140,7 +140,7 @@ function AppLayout({ appName }) {
         <TopNav open={navOpen} onClose={() => setNavOpen(false)} />
       </div>
 
-      <main className="no-scrollbar flex-1 overflow-y-auto px-4 pb-4 pt-2 lg:px-6 lg:pb-6 lg:pt-2">
+      <main className="flex-1 overflow-y-auto px-4 pb-4 pt-2 lg:px-6 lg:pb-6 lg:pt-2">
         <div className="w-full animate-fade-in">
           <Routes>
               <Route path="/" element={<DashboardRedirect />} />

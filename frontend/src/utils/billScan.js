@@ -524,11 +524,26 @@ function extractByContent(layout, raw = false) {
       return { label: col === rateCol ? 'Rate' : FIELD_LABEL[f] || `Column ${i + 1}`, field: f && f !== 'exp' ? f : null };
     });
     const table = [];
-    for (const cells of rows) {
+    const isRow = new Set(rows);
+    let last = null;
+    for (const cells of all) {
+      if (!isRow.has(cells)) {
+        // A line between item rows with only a few words, all under the item names (bar stray marks):
+        // the rest of the name above it – the potency / size a bill prints on a second line.
+        const under = cells.filter((c) => Math.min(c.x1, nameCol.x1) - Math.max(c.x, nameCol.x) > 0);
+        const more = words(under.flatMap((c) => c.words)).join(' ').toUpperCase();
+        if (last && wrapLine(more, under.flatMap((c) => c.words), cells.filter((c) => !under.includes(c)))) {
+          last[at] = last[at] === UNREAD_NAME ? more : `${last[at]} ${more}`;
+        } else last = null;
+        continue;
+      }
       const inCol = (col) => cells.filter((c) => c.col === col);
-      const hit = parseItemLine(inCol(nameCol).flatMap((c) => c.words).flatMap((w) => splitGlued(w.t).split(' ').map((t) => ({ t, x: w.x }))), 0, null, false);
-      if (!hit) continue;
-      table.push(real.map((col) => (col === nameCol ? hit.name : words(inCol(col).flatMap((c) => c.words)).join(' '))));
+      const nameWs = inCol(nameCol).flatMap((c) => c.words);
+      // (A row whose name couldn't be read – smudged, or a punched hole beside it – is kept with its
+      // figures, the name as read or UNREAD_NAME, so it isn't lost without anyone seeing.)
+      const hit = parseItemLine(nameWs.flatMap((w) => splitGlued(w.t).split(' ').map((t) => ({ t, x: w.x }))), 0, null, false);
+      last = real.map((col) => (col === nameCol ? (hit ? hit.name : roughName(nameWs)) : words(inCol(col).flatMap((c) => c.words)).join(' ')));
+      table.push(last);
     }
     return table.length ? { heads, rows: table } : null;
   }
@@ -627,6 +642,20 @@ const FIELD_LABEL = {
   name: 'Item Description', hsnCode: 'HSN', rack: 'Rack', manufacturer: 'MFR', category: 'Batch', pack: 'Pack', mrp: 'MRP', qty: 'Qty', exp: 'Exp',
 };
 const NOT_WRAP = /\b(total|grand|amount|taxable|net|value|words|remarks)\b/i;
+// The Item Name cell of an item row whose name OCR couldn't make out: the
+// name column's text as read, or UNREAD_NAME when there is none. The row is
+// still shown (and filled in with no name), so the bill's line isn't lost.
+export const UNREAD_NAME = '?';
+// A name's second line: up to 4 words under Item Description (e.g. "30C 100ML"), not a totals line, with
+// nothing else on the line but stray marks of a letter or two (a "|", ";" or "4" the scan picked up).
+function wrapLine(more, nameWords, others) {
+  if (!nameWords.length || nameWords.length > 4 || !/[A-Z0-9]/.test(more) || NOT_WRAP.test(more)) return false;
+  return others.every((w) => trimTok(cleanLine(w.t)).length <= 2 && !/\d[.,]\d/.test(w.t));
+}
+function roughName(ws) {
+  const t = words(ws).join(' ').toUpperCase().replace(/[^A-Z0-9 ./\-]/g, '').replace(/\s+/g, ' ').trim();
+  return /[A-Z]{3,}/.test(t) ? t.slice(0, 200) : UNREAD_NAME;
+}
 
 // Under one heading the bill may print two figures ("MRP" over "185.00 35.00",
 // the discount having no heading OCR could read): give each its own column.
@@ -665,13 +694,19 @@ export function extractBillTable(input) {
     if (figures < 2) {
       // Only a few words, all under Item Description, right after an item: the rest of its name.
       const more = words(nameWs).join(' ').toUpperCase();
-      if (last && nameWs.length === line.length && nameWs.length <= 4 && /[A-Z0-9]/.test(more) && !NOT_WRAP.test(more)) {
-        last[cols.indexOf(nameCol)] += ` ${more}`;
+      if (last && wrapLine(more, nameWs, line.filter((w) => !nameWs.includes(w)))) {
+        const at = cols.indexOf(nameCol);
+        last[at] = last[at] === UNREAD_NAME ? more : `${last[at]} ${more}`;
       } else last = null;
       continue;
     }
-    const hit = parseItemLine(nameWs, 0, null, false);
-    if (!hit) { last = null; continue; }
+    let hit = parseItemLine(nameWs, 0, null, false);
+    if (!hit) {
+      // Not a readable name: still an item row when it carries most of a row's figures
+      // (HSN, batch, dates, MRP, qty, rate...) and isn't a totals line.
+      if (figures < 4 || NOT_WRAP.test(line.map((w) => w.t).join(' '))) { last = null; continue; }
+      hit = { name: roughName(nameWs), pack: '' };
+    }
     last = cols.map((c) => (c === nameCol ? hit.name : words(by.get(c)).join(' ')));
     const packCol = cols.findIndex((c) => c.field === 'pack');
     if (packCol >= 0 && !last[packCol] && hit.pack) last[packCol] = hit.pack;
@@ -687,7 +722,7 @@ export function extractBillTable(input) {
   // HSN + Batch are left out once the columns are matched.
   const unique = rows.filter((r) => {
     const k = r.map((c) => compact(c)).join('|');
-    if (!compact(r[nameAt]) || seen.has(k)) return false;
+    if ((!compact(r[nameAt]) && r[nameAt] !== UNREAD_NAME) || seen.has(k)) return false;
     seen.add(k);
     return true;
   });

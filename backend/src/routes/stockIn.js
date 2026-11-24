@@ -128,6 +128,28 @@ async function lockReason(request, stockInId) {
   return null;
 }
 
+// A vendor's Bill No (its own invoice number) is entered once: the Stock In No
+// that already has it for this vendor (other than exceptId), or null. Two
+// vendors may use the same number; case and spaces at the ends don't count.
+async function billNoUsed(request, vendorId, billNo, exceptId) {
+  if (!billNo) return null;
+  const r = await request.input('bnVendor', sql.Int, vendorId).input('bnNo', sql.NVarChar(50), billNo).input('bnExcept', sql.Int, exceptId || 0).query(`
+    SELECT TOP 1 ${SI_NO} AS StockInNo FROM StockIn h
+    WHERE h.IsActive = 1 AND h.VendorId = @bnVendor AND UPPER(LTRIM(RTRIM(h.BillNo))) = UPPER(@bnNo) AND h.StockInId <> @bnExcept`);
+  return r.recordset[0]?.StockInNo || null;
+}
+
+// GET /stock-ins/bill-no?vendorId=&billNo=&excludeStockInId= — Three in One checks before it saves anything.
+router.get('/bill-no', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const vendorId = Number(req.query.vendorId) || 0;
+    res.json({ StockInNo: await billNoUsed(pool.request(), vendorId, text(req.query.billNo), Number(req.query.excludeStockInId) || 0) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const pool = await getPool();
@@ -154,6 +176,8 @@ async function checkStockIn(tx, body, stockInId) {
   if (billNo.length > 50) return { error: 'Bill No must be at most 50 characters' };
   const vendorId = Number(body.vendorId);
   if (!(vendorId > 0)) return { error: 'Vendor Name is required' };
+  const usedBy = await billNoUsed(new sql.Request(tx), vendorId, billNo, stockInId);
+  if (usedBy) return { error: `Bill No ${billNo.toUpperCase()} is already saved for this vendor (Stock In ${usedBy})` };
   const orderId = Number(body.purchaseOrderId);
   if (!(orderId > 0)) return { error: 'Purchase No is required' };
   const po = await new sql.Request(tx).input('id', sql.Int, orderId)

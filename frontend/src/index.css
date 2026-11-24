@@ -15,9 +15,22 @@
     @apply bg-ink-50 text-ink-800 antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: #a7b0c0 #f5f7fa;
+  /* Scroll bars: the always-visible 8px bar below (Chrome, Edge, Safari) on desktop and tablets.
+     Chrome / Edge ignore it on any element that has the standard scrollbar-width / scrollbar-color, and on a
+     touch screen (tablet) those give a thin overlay bar that only shows while scrolling – so the standard
+     ones are only for browsers without the -webkit- bar (Firefox) and for phones (narrow screens), which
+     keep their overlay bar. */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #a7b0c0 #f5f7fa;
+    }
+  }
+  @media (max-width: 767px) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #a7b0c0 #f5f7fa;
+    }
   }
   *::-webkit-scrollbar {
     width: 8px;

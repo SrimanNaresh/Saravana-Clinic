@@ -178,6 +178,8 @@ export const stockInApi = {
   // Orders still to be received; includeOrderId keeps one listed (the order of a Stock In being edited)
   orders: (vendorId, includeOrderId) => api.get('/stock-ins/orders', { params: { vendorId, includeOrderId } }).then((r) => r.data),
   orderLines: (orderId, excludeStockInId) => api.get(`/stock-ins/order-lines/${orderId}`, { params: { excludeStockInId } }).then((r) => r.data),
+  // { StockInNo } of the Stock In that already has this vendor's Bill No, or { StockInNo: null }
+  billNoUsed: (vendorId, billNo, excludeStockInId) => api.get('/stock-ins/bill-no', { params: { vendorId, billNo, excludeStockInId } }).then((r) => r.data),
   create: (data) => api.post('/stock-ins', data).then((r) => r.data),
   update: (id, data) => api.put(`/stock-ins/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/stock-ins/${id}`).then((r) => r.data),

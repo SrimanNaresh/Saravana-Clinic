@@ -136,6 +136,18 @@ export default function StockIps() {
   const [saving, setSaving] = useState(false);
   // The order once saved, while its Stock In still isn't: { id, no }.
   const [savedPo, setSavedPo] = useState(null);
+  // The vendor's Bill No already on a saved Stock In (that Stock In No), checked as it is typed.
+  const [billUsed, setBillUsed] = useState(null);
+  const billUsedText = billUsed ? `Bill No ${billNo.trim().toUpperCase()} is already saved for this vendor (Stock In ${billUsed})` : '';
+  useEffect(() => {
+    setBillUsed(null);
+    if (!vendorId || !billNo.trim() || savedPo) return undefined;
+    let live = true;
+    const timer = setTimeout(() => {
+      stockInApi.billNoUsed(vendorId, billNo.trim()).then((r) => { if (live) setBillUsed(r.StockInNo || null); }).catch(() => {});
+    }, 400);
+    return () => { live = false; clearTimeout(timer); };
+  }, [vendorId, billNo, savedPo]);
   // Vendor details (from Vendor Master, editable — saved on the order), shown with ›;
   // a new vendor being added: { name, address, mobile, gstNo?, email? } or null.
   const [details, setDetails] = useState('');
@@ -305,10 +317,15 @@ export default function StockIps() {
     }
   };
 
-  // Scanned lines fill the table (after the rows already typed in); repeats are left out.
+  // Scanned lines fill the table (after the rows already typed in). A repeat is
+  // the same line read twice (same Item Name, HSN, Batch and figures) and is left
+  // out; the same name, HSN and batch with other figures is another line of the
+  // bill (a name read without its potency, say) and is kept, marked as a repeat
+  // to correct. The popup stays open for the bill's next page; the supplier
+  // comes with the first page's lines only.
   const fromBill = (lines, { supplier } = {}) => {
-    setScanOpen(false);
-    const have = new Set(rows.map(entryKey).filter(Boolean));
+    const lineKey = (r) => (entryKey(r) ? `${entryKey(r)}|${Number(r.mrp) || 0}|${Number(r.pRate) || 0}|${Number(r.qty) || 0}` : '');
+    const have = new Set(rows.map(lineKey).filter(Boolean));
     const add = [];
     let repeats = 0;
     for (const b of lines) {
@@ -318,11 +335,10 @@ export default function StockIps() {
         qty: numStr(b.qty), free: numStr(b.free), gst: numStr(b.gst),
         batch: b.batch || b.category, mfg: toText(b.mfg), exp: toText(b.exp), sDisc: numStr(b.sDisc),
       };
-      // P.Rate = MRP less Disc % (or the Disc % from the bill's rate); S.Disc % from a selling price.
-      if (r.disc !== '') Object.assign(r, priced(r, 'disc', r.disc));
-      else if (Number(r.pRate) > 0) Object.assign(r, priced(r, 'pRate', r.pRate));
+      // P.Rate and Disc % stay exactly as read from the bill: neither is worked
+      // out from the other or from the MRP. S.Disc % from a selling price.
       if (r.sDisc === '' && Number(b.sel) > 0 && Number(r.mrp) >= Number(b.sel)) r.sDisc = String(round2((1 - Number(b.sel) / Number(r.mrp)) * 100));
-      const k = entryKey(r);
+      const k = lineKey(r);
       if (k && have.has(k)) { repeats += 1; continue; }
       have.add(k);
       add.push(r);
@@ -336,6 +352,7 @@ export default function StockIps() {
     if (!vendorId) return show('Vendor Name is required', 'error');
     if (!date) return show('Date is required', 'error');
     if (!billNo.trim()) return show('Bill No is required', 'error');
+    if (billUsed && !savedPo) return show(billUsedText, 'error');
     const lines = view.filter((v) => v.isUsed);
     if (!lines.length) return show('Add at least one line (or Scan Bill)', 'error');
     const bad = lines.find((v) => v.problem);
@@ -343,6 +360,11 @@ export default function StockIps() {
     setSaving(true);
     let po = savedPo;
     try {
+      // 0. This vendor's Bill No must not be saved already — checked before anything is added.
+      if (!po) {
+        const used = (await stockInApi.billNoUsed(vendorId, billNo.trim()).catch(() => ({}))).StockInNo;
+        if (used) { setBillUsed(used); throw new Error(`Bill No ${billNo.trim().toUpperCase()} is already saved for this vendor (Stock In ${used})`); }
+      }
       // 1. New items into Item Master (their pick-list values first).
       const ids = new Map(lines.map((v) => [v.r.key, v.item?.ItemId ?? null]));
       if (!po) {
@@ -501,7 +523,9 @@ export default function StockIps() {
         </div>
         <div className="w-40">
           <label className="label">Bill No *</label>
-          <input className="input uppercase" maxLength={50} placeholder="Supplier bill no" value={billNo} onChange={(e) => setBillNo(e.target.value.toUpperCase())} />
+          <input className={`input uppercase ${billUsed ? '!border-red-400' : ''}`} maxLength={50} placeholder="Supplier bill no" value={billNo}
+            aria-invalid={billUsed ? true : undefined} onChange={(e) => setBillNo(e.target.value.toUpperCase())} />
+          {billUsed && <p className="mt-1 text-[11px] font-medium text-red-600">{billUsedText}</p>}
         </div>
         <p className="pb-2 text-xs text-ink-500">
           {used.length} line{used.length === 1 ? '' : 's'}{newCount ? ` · ${newCount} new item${newCount === 1 ? '' : 's'} for Item Master` : ''}
