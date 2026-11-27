@@ -243,6 +243,15 @@ function taxPair(text) {
 function fieldsOf(cells, map, targets = TARGETS) {
   const o = {};
   for (const [key] of targets) if (map[key] != null) o[key] = valueFor(key, cells[map[key]]);
+  // Three in One (IPS) takes every column exactly as read: nothing is worked
+  // out from another column (Disc %, P.Rate, GST %, Amount, GST Amt, Total,
+  // Sel.Amount all stay as printed on the bill). A "9%+9%" under GST% is read as 18.
+  if (targets === IPS_TARGETS) {
+    const pair = map.gst != null ? taxPair(cells[map.gst]) : null;
+    if (pair) o.gst = String(Math.round((pair[0] + pair[1]) * 100) / 100);
+    delete o.cgst; delete o.sgst; delete o.oldPrice;
+    return o;
+  }
   if (o.disc != null) o.disc = discPercent(cells[map.disc], o);
   const r2 = (n) => String(Math.round(n * 100) / 100);
   const n = (k) => Number(o[k]) || 0;
@@ -542,8 +551,7 @@ export default function ScanBillModal({ open, onClose, onAdded, forOrder = false
   // Batch (and lines with no item name).
   const applyColumns = () => {
     // Stock In: the bill's lines (with an item name) go back to fill its rows.
-    // Three in One: every line with an item name, with the order's maths
-    // (Disc % read as a %, P.Rate / GST % from Amount, Total... when missing).
+    // Three in One: every line with an item name, each column as read (no maths).
     // (A line whose name couldn't be read comes as UNREAD_NAME: kept, with an
     // empty name to fill in, so the bill's line isn't lost.) The popup then
     // stays open for the bill's next page; the supplier goes with the first fill.
@@ -1136,7 +1144,7 @@ function ColumnMatch({ table, map, setMap, onRemoveCol, onRemoveRow, disabled, o
           })}
         </div>
         <p className="mt-1.5 text-[11px] text-ink-400">{forIps
-          ? 'The lines fill the Three in One table: Item Master columns (new items are added on save), Purchase / Order columns (P.Rate = MRP less Disc %; Amount or Old Price give the rate, GST Amt or Total the GST %, when missing) and Stock In columns (Batch No, dates as MM/YY, S.Disc %, Sel.Amount). Category is used as the Batch No when there is no Batch No column.'
+          ? 'The lines fill the Three in One table: Item Master columns (new items are added on save), Purchase / Order columns and Stock In columns (Batch No, dates as MM/YY, S.Disc %, Sel.Amount). Every value is kept exactly as read; nothing is worked out from another column. Category is used as the Batch No when there is no Batch No column.'
           : forStock
           ? 'Each bill line fills the Stock In row of the same item on the order: Batch No, Mf.Date, Exp.Date, R.Order, R.Free and S.Disc%. Received (split into R.Order + R.Free) or Amount give R.Order when there is no R.Order column; Sel.Amount or Unit Price give S.Disc% of the MRP. The order\'s own columns (Pack, Unit, MRP, P.Rate, Disc%, GST, Ordered, Free) help pick the row when names are alike. Dates like 2/28 or 12/2027 are read as MM/YY. Lines not on the order are listed, not added.'
           : <>Generic, Manufacturer, HSN, Category, Pack, Unit and Rack are saved on new items. Amount or Old Price give the P.Rate, and GST Amt or Total the GST %, when the bill has no such column; the order works out its own Amount, GST Amt and Total. A discount printed as an amount is turned into Disc % (of MRP); one that can&apos;t be worked out is left blank.</>}</p>

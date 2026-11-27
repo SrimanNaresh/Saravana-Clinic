@@ -9,7 +9,7 @@ import { itemMasterApi, purchaseOrderApi, stockInApi, vendorApi, ipsDraftApi } f
 import { emptyForm } from './ItemForm.jsx';
 import ScanBillModal from './ScanBillModal.jsx';
 import { compact, likeness } from '../../utils/billScan.js';
-import { purchaseLine, round2, roundOffOf, selAmount } from '../../utils/purchaseCalc.js';
+import { round2, roundOffOf } from '../../utils/purchaseCalc.js';
 
 // Pharmacy > Stock In > Three in One (IPS): Item, Purchase and Stock in one
 // entry. Scan the supplier's bill (or type the lines), check the table — its
@@ -17,8 +17,10 @@ import { purchaseLine, round2, roundOffOf, selAmount } from '../../utils/purchas
 // screens — and one Save:
 //   1. adds the lines' new items to Item Master (an item with the same
 //      Item Name, HSN and Category is used as it is),
-//   2. saves the Purchase Order (P.Rate = MRP less Disc %; sent with Disc % 0,
-//      as Saravana's order takes its Disc % off P.Rate again),
+//   2. saves the Purchase Order (P.Rate as read from the bill; sent with Disc % 0,
+//      as Saravana's order takes its Disc % off P.Rate again). The grid works
+//      nothing out: P.Rate, Disc %, Amount, GST Amt, Total, S.Disc % and
+//      Sel.Amount are shown as scanned (or typed),
 //   3. saves the Stock In for all of it (Batch No, Mf/Exp month, S.Disc %),
 //      which adds the stock and sets each item's selling price.
 // Each step goes through its own screen's server checks; the rows are
@@ -26,8 +28,6 @@ import { purchaseLine, round2, roundOffOf, selAmount } from '../../utils/purchas
 // order was, the order is kept and the Stock In can be saved again here.
 
 const MAX_GST = 28;
-// P.Rate here is the net rate: MRP less Disc %.
-const pRateOf = (mrp, disc) => round2(Number(mrp || 0) - (Number(mrp || 0) * Number(disc || 0)) / 100);
 const pad = (n) => String(n).padStart(2, '0');
 const today = () => new Date().toISOString().slice(0, 10);
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
@@ -48,8 +48,8 @@ let nextKey = 1;
 const emptyRow = () => ({
   key: nextKey++, itemId: null,
   name: '', generic: '', manufacturer: '', hsn: '', category: '', pack: '', unit: '', rack: '',
-  mrp: '', disc: '', pRate: '', qty: '', free: '', gst: '',
-  batch: '', mfg: '', exp: '', sDisc: '',
+  mrp: '', disc: '', pRate: '', qty: '', free: '', amount: '', gst: '', gstAmt: '', total: '',
+  batch: '', mfg: '', exp: '', sDisc: '', sel: '',
 });
 
 // The vendor's details from Vendor Master, as on the order (saved on it).
@@ -60,21 +60,6 @@ function vendorDetails(v) {
   const dl = [v.DLNo, v.DLNo2].filter(Boolean).join(', ');
   return [v.Address, statePin, phones, v.Email && `Email: ${v.Email}`, v.GSTNo && `GSTIN: ${v.GSTNo}`, dl && `DL No: ${dl}`]
     .filter(Boolean).join('\n');
-}
-
-// P.Rate = MRP less Disc %: typing MRP or Disc % works out the P.Rate, typing
-// the P.Rate works out the Disc % (as on the order).
-function priced(r, key, value) {
-  const next = { ...r, [key]: value };
-  const mrp = Number(next.mrp);
-  if (!(mrp > 0)) return { [key]: value };
-  if (key === 'pRate') {
-    if (value === '') return { pRate: value };
-    const d = round2((1 - Number(value) / mrp) * 100);
-    return { pRate: value, disc: d > 0 && d <= 100 ? String(d) : '' };
-  }
-  if (next.disc === '' && key === 'mrp') return { mrp: value };
-  return { [key]: value, pRate: String(pRateOf(next.mrp, next.disc)) };
 }
 
 // The Item Master item this row is: the same Item Name, with no other HSN or
@@ -114,12 +99,6 @@ function rowProblem(r, now) {
   if (!(s >= 0 && s <= 100)) return 'S.Disc % must be 0–100';
   return null;
 }
-
-const calcOf = (r) => {
-  const half = Number(r.gst || 0) / 2;
-  // P.Rate already has the Disc % taken off, so no discount again here.
-  return purchaseLine({ pRate: r.pRate, discPercent: 0, quantity: r.qty, cgstPercent: half, sgstPercent: half });
-};
 
 export default function StockIps() {
   const navigate = useNavigate();
@@ -195,9 +174,10 @@ export default function StockIps() {
     const first = k ? rows.findIndex((o) => entryKey(o) === k) : i;
     const isUsed = used.includes(r);
     const problem = !isUsed ? null : first !== i ? `Same Item Name, HSN and Batch as row ${first + 1}` : rowProblem(r, now);
-    return { r, item, problem, isUsed, calc: calcOf(r) };
+    return { r, item, problem, isUsed };
   });
-  const sum = round2(view.filter((v) => v.isUsed).reduce((s, v) => s + v.calc.total, 0));
+  // Sum of the Total column as scanned / typed (no line is worked out here).
+  const sum = round2(view.filter((v) => v.isUsed).reduce((s, v) => s + (Number(v.r.total) || 0), 0));
   const roundOff = roundOn ? roundOffOf(sum) : 0;
   const newCount = view.filter((v) => v.isUsed && !v.item).length;
 
@@ -251,7 +231,7 @@ export default function StockIps() {
       const it = one[0];
       const fill = { generic: it.GenericName, manufacturer: it.ManufacturerName, hsn: it.HSNCode, category: it.Category, pack: it.Pack, unit: it.UnitName, rack: it.Rack };
       for (const [f, v] of Object.entries(fill)) if (!r[f] && v) patch[f] = String(v);
-      if (!r.mrp && Number(it.MRP) > 0) Object.assign(patch, priced({ ...r, ...patch }, 'mrp', numStr(it.MRP)));
+      if (!r.mrp && Number(it.MRP) > 0) patch.mrp = numStr(it.MRP);
       if (!r.gst && (it.CGSTPercent != null || it.SGSTPercent != null)) patch.gst = String(round2(Number(it.CGSTPercent || 0) + Number(it.SGSTPercent || 0)));
     }
     setRow(r.key, patch);
@@ -332,12 +312,11 @@ export default function StockIps() {
       const r = {
         ...emptyRow(), name: b.name, generic: b.generic, manufacturer: b.manufacturer, hsn: b.hsnCode, category: b.category,
         pack: b.pack, unit: b.unit, rack: b.rack, mrp: numStr(b.mrp), disc: numStr(b.disc), pRate: numStr(b.pRate),
-        qty: numStr(b.qty), free: numStr(b.free), gst: numStr(b.gst),
-        batch: b.batch || b.category, mfg: toText(b.mfg), exp: toText(b.exp), sDisc: numStr(b.sDisc),
+        qty: numStr(b.qty), free: numStr(b.free), amount: numStr(b.amount), gst: numStr(b.gst), gstAmt: numStr(b.gstAmt), total: numStr(b.total),
+        batch: b.batch || b.category, mfg: toText(b.mfg), exp: toText(b.exp), sDisc: numStr(b.sDisc), sel: numStr(b.sel),
       };
-      // P.Rate and Disc % stay exactly as read from the bill: neither is worked
-      // out from the other or from the MRP. S.Disc % from a selling price.
-      if (r.sDisc === '' && Number(b.sel) > 0 && Number(r.mrp) >= Number(b.sel)) r.sDisc = String(round2((1 - Number(b.sel) / Number(r.mrp)) * 100));
+      // Every column stays exactly as read from the bill: nothing is worked out
+      // from another column (P.Rate, Disc %, Amount, GST Amt, Total, S.Disc %, Sel.Amount).
       const k = lineKey(r);
       if (k && have.has(k)) { repeats += 1; continue; }
       have.add(k);
@@ -446,7 +425,7 @@ export default function StockIps() {
   const freeze1 = 'sticky left-[36px] w-[230px] min-w-[230px] max-w-[230px] shadow-[2px_0_0_0_rgb(226_232_240)]';
   const lockedOrder = Boolean(savedPo); // after the order is saved, only the Stock In columns can change
   // Arrow keys (gridKeys): each box is data-r (row) / data-c (its column, left to right).
-  const COL = Object.fromEntries(['name', 'generic', 'manufacturer', 'hsn', 'category', 'pack', 'unit', 'rack', 'mrp', 'disc', 'pRate', 'qty', 'free', 'gst', 'batch', 'mfg', 'exp', 'sDisc', 'add', 'remove'].map((k, c) => [k, c]));
+  const COL = Object.fromEntries(['name', 'generic', 'manufacturer', 'hsn', 'category', 'pack', 'unit', 'rack', 'mrp', 'disc', 'pRate', 'qty', 'free', 'amount', 'gst', 'gstAmt', 'total', 'batch', 'mfg', 'exp', 'sDisc', 'sel', 'add', 'remove'].map((k, c) => [k, c]));
   const rowNo = new Map(rows.map((r, i) => [r.key, i]));
   // A box reached with the arrows that's hidden under the frozen # / Item Name
   // columns is scrolled out from under them.
@@ -568,7 +547,7 @@ export default function StockIps() {
             </tr>
           </thead>
           <tbody>
-            {view.map(({ r, item, problem, isUsed, calc }, i) => (
+            {view.map(({ r, item, problem, isUsed }, i) => (
               <tr key={r.key} className={problem ? 'bg-red-50' : 'bg-white'} title={problem || ''}>
                 <td className={`${cell} ${freeze0} z-10 text-center text-ink-400 ${problem ? 'bg-red-50' : 'bg-white'}`}>{i + 1}</td>
                 <td className={`${cell} ${freeze1} z-10 ${problem ? 'bg-red-50' : 'bg-white'}`}>
@@ -587,21 +566,21 @@ export default function StockIps() {
                 {text(r, 'pack', 65)}
                 {text(r, 'unit', 55)}
                 {text(r, 'rack', 55)}
-                {num(r, 'mrp', 70, (v) => priced(r, 'mrp', v))}
+                {num(r, 'mrp', 70)}
                 <td className={`${cell} ${ro}`}>{item ? money(lastRates[item.ItemId] ?? 0) : ''}</td>
-                {num(r, 'disc', 55, (v) => priced(r, 'disc', v))}
-                {num(r, 'pRate', 70, (v) => priced(r, 'pRate', v), { className: Number(r.pRate) > Number(r.mrp) ? 'border-red-400 bg-red-50 text-red-700' : '' })}
+                {num(r, 'disc', 55)}
+                {num(r, 'pRate', 70, null, { className: Number(r.pRate) > Number(r.mrp) ? 'border-red-400 bg-red-50 text-red-700' : '' })}
                 {num(r, 'qty', 50)}
                 {num(r, 'free', 50)}
-                <td className={`${cell} ${ro}`}>{isUsed ? money(calc.amount) : ''}</td>
+                {num(r, 'amount', 75)}
                 {num(r, 'gst', 50)}
-                <td className={`${cell} ${ro}`}>{isUsed ? money(calc.gstAmount) : ''}</td>
-                <td className={`${cell} ${ro} font-semibold text-ink-800`}>{isUsed ? money(calc.total) : ''}</td>
+                {num(r, 'gstAmt', 70)}
+                {num(r, 'total', 80, null, { className: 'font-semibold' })}
                 {text(r, 'batch', 90, { stock: true })}
                 {month(r, 'mfg')}
                 {month(r, 'exp')}
                 {num(r, 'sDisc', 55, null, { stock: true })}
-                <td className={`${cell} ${ro}`}>{Number(r.mrp) > 0 ? money(selAmount({ mrp: r.mrp, discPercent: r.sDisc })) : ''}</td>
+                {num(r, 'sel', 75, null, { stock: true })}
                 <td className={`${cell} whitespace-nowrap text-center`}>
                   <button data-r={i} data-c={COL.add} type="button" className="rounded p-1 text-brand-600 hover:bg-brand-50 disabled:opacity-30" title="Add a row below" disabled={lockedOrder} onClick={() => addRowAfter(r.key)}><Plus size={14} /></button>
                   <button data-r={i} data-c={COL.remove} type="button" className="rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-30" title="Remove this row" disabled={lockedOrder} onClick={() => removeRow(r.key)}><Trash2 size={14} /></button>
